@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "ESP32S3 Build",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"C:\\Users\\sprin\\esp\\v5.5\\esp-idf\\export.bat && idf.py build"
+			],
+			"group": "build",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			]
+		}
+	]
+}
