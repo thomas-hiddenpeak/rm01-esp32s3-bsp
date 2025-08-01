@@ -1,0 +1,18 @@
+Command: ninja all
+[1/9] Performing build step for 'bootloader'
+[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\sprin\rm01-esp32s3-bsp\build\bootloader\esp-idf\esptool_py && C:\Users\sprin\.espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe C:/Users/sprin/esp/v5.5/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 C:/Users/sprin/rm01-esp32s3-bsp/build/bootloader/bootloader.bin"
+Bootloader binary size 0x5580 bytes. 0x2a80 bytes (33%) free.
+[2/9] No install step for 'bootloader'
+[3/9] Completed 'bootloader'
+[4/9] Building C object esp-idf/console_interface/CMakeFiles/__idf_console_interface.dir/console_interface.c.obj
+[5/9] Linking C static library esp-idf\console_interface\libconsole_interface.a
+[6/9] Generating esp-idf/esp_system/ld/sections.ld
+[7/9] Linking CXX executable rm01-esp32s3-bsp.elf
+[8/9] Generating binary image from built executable
+esptool.py v4.9.1
+Creating esp32s3 image...
+Merged 2 ELF sections
+Successfully created esp32s3 image.
+Generated C:/Users/sprin/rm01-esp32s3-bsp/build/rm01-esp32s3-bsp.bin
+[9/9] C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\sprin\rm01-esp32s3-bsp\build\esp-idf\esptool_py && C:\Users\sprin\.espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe C:/Users/sprin/esp/v5.5/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app C:/Users/sprin/rm01-esp32s3-bsp/build/partition_table/partition-table.bin C:/Users/sprin/rm01-esp32s3-bsp/build/rm01-esp32s3-bsp.bin"
+rm01-esp32s3-bsp.bin binary size 0x4e1e0 bytes. Smallest app partition is 0x100000 bytes. 0xb1e20 bytes (69%) free.

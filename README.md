@@ -7,7 +7,7 @@
 
 ## 🚀 主要特性
 
-- **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、GPIO通用操作
+- **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、GPIO通用操作、USB MUX切换
 - **📊 系统监控**: 内存监控、CPU监控、温度监控、任务状态监控
 - **💻 控制台接口**: 统一的UART控制台，支持丰富的交互命令
 - **🧩 组件化架构**: 模块化设计，便于扩展和维护
@@ -31,6 +31,15 @@
 - 支持任意GPIO引脚操作
 - 高/低电平设置和读取
 - 引脚状态监控
+
+### USB MUX控制
+- **MUX1引脚**: GPIO 8 - USB MUX1选择控制
+- **MUX2引脚**: GPIO 48 - USB MUX2选择控制
+- 支持切换USB-C接口连接目标：
+  - **ESP32S3**: mux1=0, mux2=0 (默认)
+  - **AGX**: mux1=1, mux2=0
+  - **N305**: mux1=1, mux2=1
+- 控制台命令: `usbmux esp32s3|agx|n305|status`
 
 ## 📋 如何使用
 
@@ -74,6 +83,16 @@ idf.py -p [PORT] flash monitor
 - `brightness <level>` - 设置LED亮度 (0-100%)
 - `rainbow` - 启动彩虹渐变效果
 - `gpio <pin> <level>` - 设置GPIO引脚电平
+- `usbmux <target>` - 切换USB-C接口连接目标
+  - `usbmux esp32s3` - 连接到ESP32S3
+  - `usbmux agx` - 连接到AGX
+  - `usbmux n305` - 连接到N305
+  - `usbmux status` - 查看当前连接状态
+
+#### 调试命令
+- `debug status` - 显示系统初始化状态
+- `debug hardware` - 显示硬件状态
+- `debug device` - 显示设备状态
 
 ## 📁 项目结构
 
@@ -94,6 +113,7 @@ idf.py -p [PORT] flash monitor
 └── markdown/                   项目文档
     ├── PROJECT_SUMMARY.md      项目总结
     ├── CONSOLE_GUIDE.md        控制台使用指南
+    ├── USB_MUX_CONTROL_GUIDE.md USB MUX控制功能指南
     └── README_COMPONENTS.md    组件说明文档
 ```
 

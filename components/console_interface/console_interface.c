@@ -50,6 +50,10 @@ static int cmd_fan(int argc, char **argv);
 static int cmd_bled(int argc, char **argv);
 static int cmd_tled(int argc, char **argv);
 static int cmd_gpio(int argc, char **argv);
+static int cmd_usbmux(int argc, char **argv);
+static int cmd_orin(int argc, char **argv);
+static int cmd_n305(int argc, char **argv);
+static int cmd_debug(int argc, char **argv);
 static int cmd_test(int argc, char **argv);
 static int cmd_save(int argc, char **argv);
 static int cmd_load(int argc, char **argv);
@@ -235,8 +239,28 @@ esp_err_t console_interface_register_device_commands(void)
             .func = &cmd_gpio,
         },
         {
+            .command = "usbmux",
+            .help = "USB MUX控制: usbmux esp32s3|agx|n305|status",
+            .func = &cmd_usbmux,
+        },
+        {
+            .command = "orin",
+            .help = "Orin电源控制: orin on|off|reset|recovery|status",
+            .func = &cmd_orin,
+        },
+        {
+            .command = "n305",
+            .help = "N305电源控制: n305 toggle|reset|status",
+            .func = &cmd_n305,
+        },
+        {
+            .command = "debug",
+            .help = "调试信息: debug status|hardware|device",
+            .func = &cmd_debug,
+        },
+        {
             .command = "test",
-            .help = "硬件测试: test fan|bled|tled|gpio <pin>|all|quick|stress <ms>",
+            .help = "硬件测试: test fan|bled|tled|gpio <pin>|orin|n305|all|quick|stress <ms>",
             .func = &cmd_test,
         }
     };
@@ -602,10 +626,236 @@ static int cmd_gpio(int argc, char **argv)
     return 0;
 }
 
+static int cmd_usbmux(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: usbmux esp32s3|agx|n305|status\n");
+        return 1;
+    }
+    
+    // 检查硬件控制是否已初始化
+    if (!hardware_control_is_initialized()) {
+        printf("错误: 硬件控制组件未初始化\n");
+        printf("请检查设备接口初始化状态\n");
+        return 1;
+    }
+    
+    esp_err_t ret = ESP_OK;
+    
+    if (strcmp(argv[1], "esp32s3") == 0) {
+        ret = usb_mux_set_target(USB_MUX_ESP32S3);
+        if (ret == ESP_OK) {
+            printf("USB-C接口已切换到ESP32S3\n");
+        }
+    }
+    else if (strcmp(argv[1], "agx") == 0) {
+        ret = usb_mux_set_target(USB_MUX_AGX);
+        if (ret == ESP_OK) {
+            printf("USB-C接口已切换到AGX\n");
+        }
+    }
+    else if (strcmp(argv[1], "n305") == 0) {
+        ret = usb_mux_set_target(USB_MUX_N305);
+        if (ret == ESP_OK) {
+            printf("USB-C接口已切换到N305\n");
+        }
+    }
+    else if (strcmp(argv[1], "status") == 0) {
+        usb_mux_target_t current_target;
+        ret = usb_mux_get_target(&current_target);
+        if (ret == ESP_OK) {
+            printf("当前USB-C接口连接到: %s\n", usb_mux_get_target_name(current_target));
+        }
+    }
+    else {
+        printf("用法: usbmux esp32s3|agx|n305|status\n");
+        printf("  esp32s3 - 切换到ESP32S3 USB接口\n");
+        printf("  agx     - 切换到AGX USB接口\n");
+        printf("  n305    - 切换到N305 USB接口\n");
+        printf("  status  - 显示当前USB接口状态\n");
+        return 1;
+    }
+    
+    if (ret != ESP_OK) {
+        printf("USB MUX操作失败: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_orin(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: orin on|off|reset|recovery|status\n");
+        return 1;
+    }
+    
+    // 检查硬件控制是否已初始化
+    if (!hardware_control_is_initialized()) {
+        printf("错误: 硬件控制组件未初始化\n");
+        printf("请检查设备接口初始化状态\n");
+        return 1;
+    }
+    
+    esp_err_t ret = ESP_OK;
+    
+    if (strcmp(argv[1], "on") == 0) {
+        ret = orin_power_on();
+        if (ret == ESP_OK) {
+            printf("Orin设备已开机\n");
+        }
+    }
+    else if (strcmp(argv[1], "off") == 0) {
+        ret = orin_power_off();
+        if (ret == ESP_OK) {
+            printf("Orin设备已关机\n");
+        }
+    }
+    else if (strcmp(argv[1], "reset") == 0) {
+        printf("正在重启Orin设备...\n");
+        ret = orin_reset();
+        if (ret == ESP_OK) {
+            printf("Orin设备重启完成\n");
+        }
+    }
+    else if (strcmp(argv[1], "recovery") == 0) {
+        printf("正在进入Orin恢复模式...\n");
+        ret = orin_enter_recovery_mode();
+        if (ret == ESP_OK) {
+            printf("Orin设备已进入恢复模式\n");
+            printf("USB-C接口已自动切换到AGX\n");
+        }
+    }
+    else if (strcmp(argv[1], "status") == 0) {
+        power_state_t state;
+        ret = orin_get_power_state(&state);
+        if (ret == ESP_OK) {
+            printf("Orin电源状态: %s\n", power_state_get_name(state));
+        }
+    }
+    else {
+        printf("用法: orin on|off|reset|recovery|status\n");
+        printf("  on       - 开机Orin设备\n");
+        printf("  off      - 关机Orin设备\n");
+        printf("  reset    - 重启Orin设备\n");
+        printf("  recovery - 进入恢复模式并切换USB到AGX\n");
+        printf("  status   - 显示Orin电源状态\n");
+        return 1;
+    }
+    
+    if (ret != ESP_OK) {
+        printf("Orin操作失败: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_n305(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: n305 toggle|reset|status\n");
+        return 1;
+    }
+    
+    // 检查硬件控制是否已初始化
+    if (!hardware_control_is_initialized()) {
+        printf("错误: 硬件控制组件未初始化\n");
+        printf("请检查设备接口初始化状态\n");
+        return 1;
+    }
+    
+    esp_err_t ret = ESP_OK;
+    
+    if (strcmp(argv[1], "toggle") == 0) {
+        printf("正在切换N305电源状态...\n");
+        ret = n305_power_toggle();
+        if (ret == ESP_OK) {
+            power_state_t state;
+            if (n305_get_power_state(&state) == ESP_OK) {
+                printf("N305电源已切换到: %s\n", power_state_get_name(state));
+            } else {
+                printf("N305电源状态已切换\n");
+            }
+        }
+    }
+    else if (strcmp(argv[1], "reset") == 0) {
+        printf("正在重启N305设备...\n");
+        ret = n305_reset();
+        if (ret == ESP_OK) {
+            printf("N305设备重启完成\n");
+        }
+    }
+    else if (strcmp(argv[1], "status") == 0) {
+        power_state_t state;
+        ret = n305_get_power_state(&state);
+        if (ret == ESP_OK) {
+            printf("N305电源状态: %s\n", power_state_get_name(state));
+        }
+    }
+    else {
+        printf("用法: n305 toggle|reset|status\n");
+        printf("  toggle - 切换N305开机/关机状态\n");
+        printf("  reset  - 重启N305设备\n");
+        printf("  status - 显示N305电源状态\n");
+        return 1;
+    }
+    
+    if (ret != ESP_OK) {
+        printf("N305操作失败: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_debug(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: debug status|hardware|device\n");
+        return 1;
+    }
+    
+    if (strcmp(argv[1], "status") == 0) {
+        printf("=== 系统初始化状态 ===\n");
+        printf("控制台接口: %s\n", s_console_state.initialized ? "已初始化" : "未初始化");
+        printf("硬件控制: %s\n", hardware_control_is_initialized() ? "已初始化" : "未初始化");
+        
+        // 检查设备接口状态
+        device_status_t status;
+        esp_err_t ret = device_get_full_status(&status);
+        if (ret == ESP_OK) {
+            printf("设备接口: 已初始化\n");
+            printf("硬件控制可用: %s\n", status.hardware_available ? "是" : "否");
+            printf("系统监控可用: %s\n", status.monitor_available ? "是" : "否");
+        } else {
+            printf("设备接口: 未初始化或获取状态失败\n");
+        }
+        printf("====================\n");
+    }
+    else if (strcmp(argv[1], "hardware") == 0) {
+        if (hardware_control_is_initialized()) {
+            hardware_print_status();
+        } else {
+            printf("硬件控制组件未初始化\n");
+        }
+    }
+    else if (strcmp(argv[1], "device") == 0) {
+        device_print_full_status();
+    }
+    else {
+        printf("用法: debug status|hardware|device\n");
+        printf("  status   - 显示系统初始化状态\n");
+        printf("  hardware - 显示硬件状态\n");
+        printf("  device   - 显示设备状态\n");
+        return 1;
+    }
+    
+    return 0;
+}
+
 static int cmd_test(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("用法: test fan|bled|tled|gpio <pin>|all|quick|stress <ms>\n");
+        printf("用法: test fan|bled|tled|gpio <pin>|orin|n305|gpio40|gpiofix|all|quick|stress <ms>\n");
         return 1;
     }
     
@@ -628,6 +878,43 @@ static int cmd_test(int argc, char **argv)
         int pin = atoi(argv[2]);
         ret = hardware_test_gpio(pin);
     }
+    else if (strcmp(argv[1], "orin") == 0) {
+        ret = hardware_test_orin_power();
+    }
+    else if (strcmp(argv[1], "n305") == 0) {
+        ret = hardware_test_n305_power();
+    }
+    else if (strcmp(argv[1], "gpio40") == 0) {
+        printf("开始测试Orin恢复引脚GPIO40...\n");
+        ret = hardware_test_orin_recovery_gpio();
+    }
+    else if (strcmp(argv[1], "gpiofix") == 0) {
+        printf("测试GPIO读取修复 - 使用GPIO2...\n");
+        printf("1. 设置GPIO2为HIGH\n");
+        gpio_set_output(2, GPIO_STATE_HIGH);
+        gpio_state_t state1;
+        gpio_read_input(2, &state1);
+        printf("   读取状态: %s (应该是HIGH)\n", state1 ? "HIGH" : "LOW");
+        
+        printf("2. 再次读取状态\n");
+        gpio_state_t state2;
+        gpio_read_input(2, &state2);
+        printf("   读取状态: %s (应该仍然是HIGH)\n", state2 ? "HIGH" : "LOW");
+        
+        printf("3. 设置GPIO2为LOW\n");
+        gpio_set_output(2, GPIO_STATE_LOW);
+        gpio_state_t state3;
+        gpio_read_input(2, &state3);
+        printf("   读取状态: %s (应该是LOW)\n", state3 ? "HIGH" : "LOW");
+        
+        if (state1 == GPIO_STATE_HIGH && state2 == GPIO_STATE_HIGH && state3 == GPIO_STATE_LOW) {
+            printf("GPIO读取修复测试: 通过!\n");
+            ret = ESP_OK;
+        } else {
+            printf("GPIO读取修复测试: 失败!\n");
+            ret = ESP_FAIL;
+        }
+    }
     else if (strcmp(argv[1], "all") == 0) {
         ret = device_run_full_test();
     }
@@ -644,7 +931,7 @@ static int cmd_test(int argc, char **argv)
     }
     else {
         printf("未知测试项: %s\n", argv[1]);
-        printf("可用测试: fan, bled, tled, gpio <pin>, all, quick, stress <ms>\n");
+        printf("可用测试: fan, bled, tled, gpio <pin>, orin, n305, all, quick, stress <ms>\n");
         return 1;
     }
     

@@ -40,6 +40,24 @@
 #define GPIO_LED_BUILTIN    2       // 内置LED引脚(如果有)
 #define GPIO_BUTTON         0       // 按键引脚(如果有)
 
+// USB MUX控制引脚
+#define ESP32_MUX1_SEL      8       // USB MUX1选择引脚 (GPIO8)
+#define ESP32_MUX2_SEL      48      // USB MUX2选择引脚 (GPIO48)
+
+// Orin电源控制引脚
+#define ORIN_POWER_PIN      3       // Orin关机引脚 (GPIO3)
+#define ORIN_RESET_PIN      1       // Orin重启引脚 (GPIO1)
+#define ORIN_RECOVERY_PIN   40      // Orin恢复模式引脚 (GPIO40)
+
+// N305电源控制引脚
+#define N305_POWER_BTN_PIN  46      // N305电源按钮引脚 (GPIO46)
+#define N305_RESET_PIN      2       // N305重启引脚 (GPIO2)
+
+// 电源控制时序配置
+#define ORIN_RESET_PULSE_MS     1000    // Orin重启脉冲持续时间(毫秒)
+#define N305_POWER_PULSE_MS     300     // N305电源按钮脉冲持续时间(毫秒)
+#define N305_RESET_PULSE_MS     300     // N305重启脉冲持续时间(毫秒)
+
 // 颜色预定义
 #define COLOR_RED           {255, 0, 0}
 #define COLOR_GREEN         {0, 255, 0}

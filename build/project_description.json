@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "rm01-esp32s3-bsp",
-    "project_version":    "1",
+    "project_version":    "4d7e2cd-dirty",
     "project_path":       "C:/Users/sprin/rm01-esp32s3-bsp",
     "idf_path":           "C:/Users/sprin/esp/v5.5/esp-idf",
     "build_dir":          "C:/Users/sprin/rm01-esp32s3-bsp/build",
@@ -520,7 +520,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "C:/Users/sprin/rm01-esp32s3-bsp/build/esp-idf/esp_driver_usb_serial_jtag/libesp_driver_usb_serial_jtag.a",
-            "sources": [ "C:/Users/sprin/esp/v5.5/esp-idf/components/esp_driver_usb_serial_jtag/src/usb_serial_jtag.c", "C:/Users/sprin/esp/v5.5/esp-idf/components/esp_driver_usb_serial_jtag/src/usb_serial_jtag_connection_monitor.c", "C:/Users/sprin/esp/v5.5/esp-idf/components/esp_driver_usb_serial_jtag/src/usb_serial_jtag_vfs.c" ],
+            "sources": [ "C:/Users/sprin/esp/v5.5/esp-idf/components/esp_driver_usb_serial_jtag/src/usb_serial_jtag.c", "C:/Users/sprin/esp/v5.5/esp-idf/components/esp_driver_usb_serial_jtag/src/usb_serial_jtag_connection_monitor.c" ],
             "include_dirs": [ "include" ]
         },
         "esp_hw_support": {
