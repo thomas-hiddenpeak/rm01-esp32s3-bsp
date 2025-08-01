@@ -235,7 +235,7 @@ esp_err_t console_interface_register_device_commands(void)
         },
         {
             .command = "gpio",
-            .help = "GPIO控制: gpio <pin> high|low|read",
+            .help = "GPIO控制: gpio <pin> high|low|input",
             .func = &cmd_gpio,
         },
         {
@@ -260,7 +260,7 @@ esp_err_t console_interface_register_device_commands(void)
         },
         {
             .command = "test",
-            .help = "硬件测试: test fan|bled|tled|gpio <pin>|orin|n305|all|quick|stress <ms>",
+            .help = "硬件测试: test fan|bled|tled|gpio <pin>|gpio_input <pin>|orin|n305|all|quick|stress <ms>",
             .func = &cmd_test,
         }
     };
@@ -400,12 +400,13 @@ static int cmd_help(int argc, char **argv)
     printf("\nIO控制:\n");
     printf("  gpio <pin> high      - 设置GPIO引脚为高电平\n");
     printf("  gpio <pin> low       - 设置GPIO引脚为低电平\n");
-    printf("  gpio <pin> read      - 读取GPIO引脚状态\n");
+    printf("  gpio <pin> input     - 读取GPIO引脚输入状态\n");
     printf("\n测试命令:\n");
     printf("  test fan             - 测试风扇功能\n");
     printf("  test bled            - 测试板载LED\n");
     printf("  test tled            - 测试触摸LED\n");
-    printf("  test gpio <pin>      - 测试GPIO引脚\n");
+    printf("  test gpio <pin>      - 安全测试GPIO输出功能\n");
+    printf("  test gpio_input <pin> - 测试GPIO输入功能\n");
     printf("  test all             - 测试所有硬件\n");
     printf("  test quick           - 快速测试\n");
     printf("  test stress <ms>     - 压力测试\n");
@@ -594,7 +595,7 @@ static int cmd_tled(int argc, char **argv)
 static int cmd_gpio(int argc, char **argv)
 {
     if (argc < 3) {
-        printf("用法: gpio <pin> high|low|read\n");
+        printf("用法: gpio <pin> high|low|input\n");
         return 1;
     }
     
@@ -603,19 +604,27 @@ static int cmd_gpio(int argc, char **argv)
     
     if (strcmp(argv[2], "high") == 0) {
         ret = gpio_set_output(pin, GPIO_STATE_HIGH);
+        if (ret == ESP_OK) {
+            printf("GPIO%d 已设置为高电平\n", pin);
+        }
     }
     else if (strcmp(argv[2], "low") == 0) {
         ret = gpio_set_output(pin, GPIO_STATE_LOW);
-    }
-    else if (strcmp(argv[2], "read") == 0) {
-        gpio_state_t state;
-        ret = gpio_read_input(pin, &state);
         if (ret == ESP_OK) {
-            printf("GPIO%d 当前电平: %s\n", pin, state ? "高" : "低");
+            printf("GPIO%d 已设置为低电平\n", pin);
+        }
+    }
+    else if (strcmp(argv[2], "input") == 0) {
+        gpio_state_t state;
+        ret = gpio_read_input_mode(pin, &state);
+        if (ret == ESP_OK) {
+            printf("GPIO%d 输入电平: %s\n", pin, state ? "高" : "低");
         }
     }
     else {
-        printf("用法: gpio <pin> high|low|read\n");
+        printf("用法: gpio <pin> high|low|input\n");
+        printf("注意: 'input' 将GPIO设置为输入模式并读取状态\n");
+        printf("      避免在输出模式下进行状态读取以防止干扰\n");
         return 1;
     }
     
@@ -855,7 +864,7 @@ static int cmd_debug(int argc, char **argv)
 static int cmd_test(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("用法: test fan|bled|tled|gpio <pin>|orin|n305|gpio40|gpiofix|all|quick|stress <ms>\n");
+        printf("用法: test fan|bled|tled|gpio <pin>|gpio_input <pin>|orin|n305|all|quick|stress <ms>\n");
         return 1;
     }
     
@@ -876,44 +885,23 @@ static int cmd_test(int argc, char **argv)
             return 1;
         }
         int pin = atoi(argv[2]);
+        printf("开始安全GPIO输出测试 (无状态验证以避免干扰)...\n");
         ret = hardware_test_gpio(pin);
+    }
+    else if (strcmp(argv[1], "gpio_input") == 0) {
+        if (argc < 3) {
+            printf("用法: test gpio_input <pin>\n");
+            return 1;
+        }
+        int pin = atoi(argv[2]);
+        printf("开始GPIO输入模式测试...\n");
+        ret = hardware_test_gpio_input(pin);
     }
     else if (strcmp(argv[1], "orin") == 0) {
         ret = hardware_test_orin_power();
     }
     else if (strcmp(argv[1], "n305") == 0) {
         ret = hardware_test_n305_power();
-    }
-    else if (strcmp(argv[1], "gpio40") == 0) {
-        printf("开始测试Orin恢复引脚GPIO40...\n");
-        ret = hardware_test_orin_recovery_gpio();
-    }
-    else if (strcmp(argv[1], "gpiofix") == 0) {
-        printf("测试GPIO读取修复 - 使用GPIO2...\n");
-        printf("1. 设置GPIO2为HIGH\n");
-        gpio_set_output(2, GPIO_STATE_HIGH);
-        gpio_state_t state1;
-        gpio_read_input(2, &state1);
-        printf("   读取状态: %s (应该是HIGH)\n", state1 ? "HIGH" : "LOW");
-        
-        printf("2. 再次读取状态\n");
-        gpio_state_t state2;
-        gpio_read_input(2, &state2);
-        printf("   读取状态: %s (应该仍然是HIGH)\n", state2 ? "HIGH" : "LOW");
-        
-        printf("3. 设置GPIO2为LOW\n");
-        gpio_set_output(2, GPIO_STATE_LOW);
-        gpio_state_t state3;
-        gpio_read_input(2, &state3);
-        printf("   读取状态: %s (应该是LOW)\n", state3 ? "HIGH" : "LOW");
-        
-        if (state1 == GPIO_STATE_HIGH && state2 == GPIO_STATE_HIGH && state3 == GPIO_STATE_LOW) {
-            printf("GPIO读取修复测试: 通过!\n");
-            ret = ESP_OK;
-        } else {
-            printf("GPIO读取修复测试: 失败!\n");
-            ret = ESP_FAIL;
-        }
     }
     else if (strcmp(argv[1], "all") == 0) {
         ret = device_run_full_test();
@@ -931,7 +919,17 @@ static int cmd_test(int argc, char **argv)
     }
     else {
         printf("未知测试项: %s\n", argv[1]);
-        printf("可用测试: fan, bled, tled, gpio <pin>, orin, n305, all, quick, stress <ms>\n");
+        printf("可用测试:\n");
+        printf("  fan          - 风扇测试\n");
+        printf("  bled         - 板载LED测试\n");
+        printf("  tled         - 触摸LED测试\n");
+        printf("  gpio <pin>   - GPIO安全输出测试\n");
+        printf("  gpio_input <pin> - GPIO输入测试\n");
+        printf("  orin         - Orin电源测试\n");
+        printf("  n305         - N305电源测试\n");
+        printf("  all          - 完整测试\n");
+        printf("  quick        - 快速测试\n");
+        printf("  stress <ms>  - 压力测试\n");
         return 1;
     }
     

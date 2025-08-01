@@ -29,8 +29,15 @@
 
 ### GPIO通用控制
 - 支持任意GPIO引脚操作
-- 高/低电平设置和读取
-- 引脚状态监控
+- 安全的高/低电平设置
+- 专用的输入模式读取
+- 避免输出状态干扰的设计
+
+⚠️ **GPIO安全使用原则**:
+- 输出控制：使用 `gpio <pin> high|low` 设置输出状态
+- 输入读取：使用 `gpio <pin> input` 切换到输入模式并读取
+- 避免在输出模式下进行状态读取，以防止GPIO状态干扰
+- 关键操作（如恢复模式）完全避免状态验证
 
 ### USB MUX控制
 - **MUX1引脚**: GPIO 8 - USB MUX1选择控制
@@ -82,17 +89,22 @@ idf.py -p [PORT] flash monitor
 - `led <r> <g> <b>` - 设置LED颜色 (0-255)
 - `brightness <level>` - 设置LED亮度 (0-100%)
 - `rainbow` - 启动彩虹渐变效果
-- `gpio <pin> <level>` - 设置GPIO引脚电平
+- `gpio <pin> high|low|input` - GPIO引脚控制和读取
+  - `gpio <pin> high` - 设置GPIO引脚为高电平
+  - `gpio <pin> low` - 设置GPIO引脚为低电平
+  - `gpio <pin> input` - 切换到输入模式并读取状态
 - `usbmux <target>` - 切换USB-C接口连接目标
   - `usbmux esp32s3` - 连接到ESP32S3
   - `usbmux agx` - 连接到AGX
   - `usbmux n305` - 连接到N305
   - `usbmux status` - 查看当前连接状态
 
-#### 调试命令
+#### 调试和测试命令
 - `debug status` - 显示系统初始化状态
 - `debug hardware` - 显示硬件状态
 - `debug device` - 显示设备状态
+- `test all` - 执行完整的硬件测试序列
+- `test gpio_input` - 安全的GPIO输入模式测试
 
 ## 📁 项目结构
 
