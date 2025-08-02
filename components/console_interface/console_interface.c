@@ -53,7 +53,6 @@ static int cmd_gpio(int argc, char **argv);
 static int cmd_usbmux(int argc, char **argv);
 static int cmd_orin(int argc, char **argv);
 static int cmd_n305(int argc, char **argv);
-static int cmd_debug(int argc, char **argv);
 static int cmd_test(int argc, char **argv);
 static int cmd_save(int argc, char **argv);
 static int cmd_load(int argc, char **argv);
@@ -254,11 +253,6 @@ esp_err_t console_interface_register_device_commands(void)
             .func = &cmd_n305,
         },
         {
-            .command = "debug",
-            .help = "调试信息: debug status|hardware|device",
-            .func = &cmd_debug,
-        },
-        {
             .command = "test",
             .help = "硬件测试: test fan|bled|tled|gpio <pin>|gpio_input <pin>|orin|n305|all|quick|stress <ms>",
             .func = &cmd_test,
@@ -388,29 +382,50 @@ static int cmd_help(int argc, char **argv)
     printf("  fan <0-100>   - 设置风扇速度 (0-100%%)\n");
     printf("  fan off       - 关闭风扇\n");
     printf("  fan on        - 打开风扇(50%%)\n");
-    printf("\n板载LED控制:\n");
+    printf("\n板载LED控制 (28颗WS2812):\n");
     printf("  bled <r> <g> <b>     - 设置板载LED颜色 (0-255)\n");
     printf("  bled bright <0-100>  - 设置板载LED亮度\n");
     printf("  bled off             - 关闭板载LED\n");
     printf("  bled rainbow         - 彩虹效果\n");
-    printf("\n触摸LED控制:\n");
+    printf("\n触摸LED控制 (1颗WS2812):\n");
     printf("  tled <r> <g> <b>     - 设置触摸LED颜色 (0-255)\n");
     printf("  tled bright <0-100>  - 设置触摸LED亮度\n");
     printf("  tled off             - 关闭触摸LED\n");
-    printf("\nIO控制:\n");
+    printf("\nGPIO控制:\n");
     printf("  gpio <pin> high      - 设置GPIO引脚为高电平\n");
     printf("  gpio <pin> low       - 设置GPIO引脚为低电平\n");
-    printf("  gpio <pin> input     - 读取GPIO引脚输入状态\n");
+    printf("  gpio <pin> input     - 切换到输入模式并读取状态\n");
+    printf("\nUSB MUX控制:\n");
+    printf("  usbmux esp32s3       - 切换USB-C接口到ESP32S3\n");
+    printf("  usbmux agx           - 切换USB-C接口到AGX\n");
+    printf("  usbmux n305          - 切换USB-C接口到N305\n");
+    printf("  usbmux status        - 显示当前USB接口状态\n");
+    printf("\nOrin设备控制:\n");
+    printf("  orin on              - 开机Orin设备\n");
+    printf("  orin off             - 关机Orin设备\n");
+    printf("  orin reset           - 重启Orin设备\n");
+    printf("  orin recovery        - 进入恢复模式并切换USB到AGX\n");
+    printf("  orin status          - 显示Orin电源状态\n");
+    printf("\nN305设备控制:\n");
+    printf("  n305 toggle          - 切换N305开机/关机状态\n");
+    printf("  n305 reset           - 重启N305设备\n");
+    printf("  n305 status          - 显示N305电源状态\n");
     printf("\n测试命令:\n");
     printf("  test fan             - 测试风扇功能\n");
     printf("  test bled            - 测试板载LED\n");
     printf("  test tled            - 测试触摸LED\n");
     printf("  test gpio <pin>      - 安全测试GPIO输出功能\n");
     printf("  test gpio_input <pin> - 测试GPIO输入功能\n");
+    printf("  test orin            - 测试Orin电源控制功能\n");
+    printf("  test n305            - 测试N305电源控制功能\n");
     printf("  test all             - 测试所有硬件\n");
     printf("  test quick           - 快速测试\n");
     printf("  test stress <ms>     - 压力测试\n");
-    printf("\n提示：使用 TAB 键自动补全，上下箭头浏览历史\n");
+    printf("\n注意：\n");
+    printf("  • 使用 TAB 键自动补全，上下箭头浏览历史\n");
+    printf("  • GPIO输入操作使用 'input' 参数以避免状态干扰\n");
+    printf("  • LED RGB值范围: 0-255, 亮度范围: 0-100%%\n");
+    printf("  • 风扇速度范围: 0-100%%, PWM频率: 25kHz\n");
     printf("========================================\n");
     return 0;
 }
@@ -816,51 +831,6 @@ static int cmd_n305(int argc, char **argv)
     return 0;
 }
 
-static int cmd_debug(int argc, char **argv)
-{
-    if (argc < 2) {
-        printf("用法: debug status|hardware|device\n");
-        return 1;
-    }
-    
-    if (strcmp(argv[1], "status") == 0) {
-        printf("=== 系统初始化状态 ===\n");
-        printf("控制台接口: %s\n", s_console_state.initialized ? "已初始化" : "未初始化");
-        printf("硬件控制: %s\n", hardware_control_is_initialized() ? "已初始化" : "未初始化");
-        
-        // 检查设备接口状态
-        device_status_t status;
-        esp_err_t ret = device_get_full_status(&status);
-        if (ret == ESP_OK) {
-            printf("设备接口: 已初始化\n");
-            printf("硬件控制可用: %s\n", status.hardware_available ? "是" : "否");
-            printf("系统监控可用: %s\n", status.monitor_available ? "是" : "否");
-        } else {
-            printf("设备接口: 未初始化或获取状态失败\n");
-        }
-        printf("====================\n");
-    }
-    else if (strcmp(argv[1], "hardware") == 0) {
-        if (hardware_control_is_initialized()) {
-            hardware_print_status();
-        } else {
-            printf("硬件控制组件未初始化\n");
-        }
-    }
-    else if (strcmp(argv[1], "device") == 0) {
-        device_print_full_status();
-    }
-    else {
-        printf("用法: debug status|hardware|device\n");
-        printf("  status   - 显示系统初始化状态\n");
-        printf("  hardware - 显示硬件状态\n");
-        printf("  device   - 显示设备状态\n");
-        return 1;
-    }
-    
-    return 0;
-}
-
 static int cmd_test(int argc, char **argv)
 {
     if (argc < 2) {
@@ -897,12 +867,6 @@ static int cmd_test(int argc, char **argv)
         printf("开始GPIO输入模式测试...\n");
         ret = hardware_test_gpio_input(pin);
     }
-    else if (strcmp(argv[1], "orin") == 0) {
-        ret = hardware_test_orin_power();
-    }
-    else if (strcmp(argv[1], "n305") == 0) {
-        ret = hardware_test_n305_power();
-    }
     else if (strcmp(argv[1], "all") == 0) {
         ret = device_run_full_test();
     }
@@ -925,8 +889,8 @@ static int cmd_test(int argc, char **argv)
         printf("  tled         - 触摸LED测试\n");
         printf("  gpio <pin>   - GPIO安全输出测试\n");
         printf("  gpio_input <pin> - GPIO输入测试\n");
-        printf("  orin         - Orin电源测试\n");
-        printf("  n305         - N305电源测试\n");
+        printf("  orin         - Orin电源控制测试\n");
+        printf("  n305         - N305电源控制测试\n");
         printf("  all          - 完整测试\n");
         printf("  quick        - 快速测试\n");
         printf("  stress <ms>  - 压力测试\n");

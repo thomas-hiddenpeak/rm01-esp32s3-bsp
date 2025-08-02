@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "rm01-esp32s3-bsp",
-    "project_version":    "4c333f0-dirty",
+    "project_version":    "fe32229-dirty",
     "project_path":       "C:/Users/sprin/rm01-esp32s3-bsp",
     "idf_path":           "C:/Users/sprin/esp/v5.5/esp-idf",
     "build_dir":          "C:/Users/sprin/rm01-esp32s3-bsp/build",

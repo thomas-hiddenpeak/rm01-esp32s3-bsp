@@ -8,10 +8,13 @@
 ## 🚀 主要特性
 
 - **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、GPIO通用操作、USB MUX切换
-- **📊 系统监控**: 内存监控、CPU监控、温度监控、任务状态监控
-- **💻 控制台接口**: 统一的UART控制台，支持丰富的交互命令
+- **⚡ 设备电源管理**: Orin和N305设备的电源控制和状态监控
+- **📊 系统监控**: 内存监控、CPU监控、温度监控、任务状态监控  
+- **💻 控制台接口**: 统一的UART控制台，支持丰富的交互命令和配置管理
 - **🧩 组件化架构**: 模块化设计，便于扩展和维护
 - **⚡ 事件驱动**: 异步事件处理机制
+- **💾 配置持久化**: 支持NVS配置保存和加载
+- **🔧 测试功能**: 完整的硬件测试套件
 
 ## 🛠️ 硬件功能
 
@@ -79,16 +82,27 @@ idf.py -p [PORT] flash monitor
 系统启动后，可通过UART控制台（115200波特率）使用以下命令：
 
 #### 系统命令
-- `version` - 显示系统版本信息
-- `restart` - 重启系统
-- `tasks` - 显示任务状态
-- `free` - 显示内存使用情况
+- `help` - 显示所有可用命令的详细帮助信息
+- `info` - 显示系统详细信息
+- `status` - 显示当前硬件和系统状态
+- `reboot` - 重启系统
+
+#### 配置管理命令
+- `save` - 保存当前配置到NVS闪存
+- `load` - 从NVS闪存加载配置
+- `clear` - 清除NVS中保存的配置
 
 #### 硬件控制命令
 - `fan <speed>` - 设置风扇速度 (0-100%)
-- `led <r> <g> <b>` - 设置LED颜色 (0-255)
-- `brightness <level>` - 设置LED亮度 (0-100%)
-- `rainbow` - 启动彩虹渐变效果
+  - `fan on` - 打开风扇（默认50%速度）
+  - `fan off` - 关闭风扇
+- `bled <r> <g> <b>` - 设置板载LED颜色 (RGB值: 0-255)
+  - `bled bright <level>` - 设置板载LED亮度 (0-100%)
+  - `bled rainbow` - 启动彩虹渐变效果
+  - `bled off` - 关闭板载LED
+- `tled <r> <g> <b>` - 设置触摸LED颜色 (RGB值: 0-255)
+  - `tled bright <level>` - 设置触摸LED亮度 (0-100%)
+  - `tled off` - 关闭触摸LED
 - `gpio <pin> high|low|input` - GPIO引脚控制和读取
   - `gpio <pin> high` - 设置GPIO引脚为高电平
   - `gpio <pin> low` - 设置GPIO引脚为低电平
@@ -99,12 +113,29 @@ idf.py -p [PORT] flash monitor
   - `usbmux n305` - 连接到N305
   - `usbmux status` - 查看当前连接状态
 
-#### 调试和测试命令
-- `debug status` - 显示系统初始化状态
-- `debug hardware` - 显示硬件状态
-- `debug device` - 显示设备状态
+#### 设备电源控制命令
+- `orin <action>` - Orin设备电源控制
+  - `orin on` - 开机Orin设备
+  - `orin off` - 关机Orin设备
+  - `orin reset` - 重启Orin设备
+  - `orin recovery` - 进入恢复模式并切换USB到AGX
+  - `orin status` - 显示Orin电源状态
+- `n305 <action>` - N305设备电源控制
+  - `n305 toggle` - 切换N305开机/关机状态
+  - `n305 reset` - 重启N305设备
+  - `n305 status` - 显示N305电源状态
+
+#### 测试命令
+- `test fan` - 执行风扇功能测试
+- `test bled` - 执行板载LED测试
+- `test tled` - 执行触摸LED测试
+- `test gpio <pin>` - 安全测试GPIO输出功能
+- `test gpio_input <pin>` - 测试GPIO输入功能
+- `test orin` - 测试Orin电源控制功能
+- `test n305` - 测试N305电源控制功能
 - `test all` - 执行完整的硬件测试序列
-- `test gpio_input` - 安全的GPIO输入模式测试
+- `test quick` - 执行快速测试
+- `test stress <ms>` - 执行指定时长的压力测试
 
 ## 📁 项目结构
 
