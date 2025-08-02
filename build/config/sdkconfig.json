@@ -1038,7 +1038,7 @@
     "UHCI_ENABLE_DEBUG_LOG": false,
     "UHCI_ISR_CACHE_SAFE": false,
     "UHCI_ISR_HANDLER_IN_IRAM": false,
-    "USJ_ENABLE_USB_SERIAL_JTAG": true,
+    "USJ_ENABLE_USB_SERIAL_JTAG": false,
     "VFS_INITIALIZE_DEV_NULL": true,
     "VFS_MAX_COUNT": 8,
     "VFS_SELECT_IN_RAM": false,

@@ -28,6 +28,7 @@ static esp_err_t init_fan_pwm(void);
 static esp_err_t init_ws2812(void);
 static esp_err_t init_usb_mux_gpio(void);
 static esp_err_t init_power_control_gpio(void);
+static esp_err_t disable_jtag_for_gpio40(void);
 static esp_err_t apply_led_color(led_strip_handle_t strip, led_color_t color, uint8_t brightness, uint8_t num_leds);
 static void hsv_to_rgb(int hue, int saturation, int value, uint8_t *r, uint8_t *g, uint8_t *b);
 
@@ -953,14 +954,24 @@ esp_err_t hardware_test_orin_recovery_gpio(void)
         return ESP_FAIL;
     }
     
-    // 步骤2: 重置GPIO配置
-    ESP_LOGI(TAG, "Resetting GPIO%d configuration", ORIN_RECOVERY_PIN);
-    esp_err_t ret = gpio_reset_pin(ORIN_RECOVERY_PIN);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset GPIO%d: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
-        return ESP_FAIL;
+    // 步骤2: 如果是GPIO40，特别处理JTAG问题
+    if (ORIN_RECOVERY_PIN == 40) {
+        ESP_LOGI(TAG, "GPIO40 detected - performing JTAG disable and verification");
+        esp_err_t ret = disable_jtag_for_gpio40();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to disable JTAG for GPIO40: %s", esp_err_to_name(ret));
+            return ESP_FAIL;
+        }
+    } else {
+        // 步骤2: 重置GPIO配置
+        ESP_LOGI(TAG, "Resetting GPIO%d configuration", ORIN_RECOVERY_PIN);
+        esp_err_t ret = gpio_reset_pin(ORIN_RECOVERY_PIN);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to reset GPIO%d: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+            return ESP_FAIL;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100)); // 给硬件一点时间
     }
-    vTaskDelay(pdMS_TO_TICKS(100)); // 给硬件一点时间
     
     // 步骤3: 配置为输出模式（带详细配置）
     ESP_LOGI(TAG, "Configuring GPIO%d as output with detailed settings", ORIN_RECOVERY_PIN);
@@ -971,7 +982,7 @@ esp_err_t hardware_test_orin_recovery_gpio(void)
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE
     };
-    ret = gpio_config(&io_conf);
+    esp_err_t ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure GPIO%d: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
         return ESP_FAIL;
@@ -1225,6 +1236,15 @@ static esp_err_t init_power_control_gpio(void)
 {
     esp_err_t ret;
 
+    // 如果使用GPIO40，需要先禁用JTAG功能
+    if (ORIN_RECOVERY_PIN == 40) {
+        ret = disable_jtag_for_gpio40();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to disable JTAG for GPIO40: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
+
     // 配置Orin电源控制引脚
     ret = gpio_set_direction(ORIN_POWER_PIN, GPIO_MODE_OUTPUT);
     if (ret != ESP_OK) {
@@ -1240,7 +1260,15 @@ static esp_err_t init_power_control_gpio(void)
         return ret;
     }
 
-    ret = gpio_set_direction(ORIN_RECOVERY_PIN, GPIO_MODE_OUTPUT);
+    // 特别配置GPIO40，确保完全作为普通GPIO使用
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << ORIN_RECOVERY_PIN),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE
+    };
+    ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure Orin recovery GPIO%d as output: %s", 
                  ORIN_RECOVERY_PIN, esp_err_to_name(ret));
@@ -1375,4 +1403,47 @@ static void hsv_to_rgb(int hue, int saturation, int value, uint8_t *r, uint8_t *
     *r = (*r * 255) / 100;
     *g = (*g * 255) / 100;
     *b = (*b * 255) / 100;
+}
+
+static esp_err_t disable_jtag_for_gpio40(void)
+{
+    ESP_LOGI(TAG, "Disabling JTAG functionality for GPIO40");
+    
+    // 步骤1: 重置GPIO40，清除所有之前的配置包括JTAG功能
+    esp_err_t ret = gpio_reset_pin(40);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset GPIO40: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // 步骤2: 等待硬件稳定
+    vTaskDelay(pdMS_TO_TICKS(50));
+    
+    // 步骤3: 显式地设置GPIO40为输出模式，覆盖JTAG功能
+    ret = gpio_set_direction(40, GPIO_MODE_OUTPUT);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set GPIO40 direction: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // 步骤4: 设置默认电平为低
+    ret = gpio_set_level(40, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set GPIO40 level: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // 步骤5: 验证GPIO40可以正常工作
+    vTaskDelay(pdMS_TO_TICKS(10));
+    int level = gpio_get_level(40);
+    if (level != 0) {
+        ESP_LOGW(TAG, "GPIO40 level verification failed - expected 0, got %d", level);
+        ESP_LOGW(TAG, "This may indicate JTAG is still active or hardware conflict");
+    } else {
+        ESP_LOGI(TAG, "GPIO40 successfully configured as standard GPIO (level verified: %d)", level);
+    }
+    
+    ESP_LOGI(TAG, "JTAG disable procedure completed for GPIO40");
+    ESP_LOGI(TAG, "Note: USB Serial JTAG is disabled in sdkconfig (CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n)");
+    return ESP_OK;
 }
