@@ -1,4 +1,28 @@
 dependencies:
+  espressif/console_cmd_ping:
+    component_hash: 2fbd2faaf80bc23c9d66e0dc33cba5928a7e62361b344a6d4007b738b15fdb1f
+    dependencies:
+    - name: espressif/console_simple_init
+      registry_url: https://components.espressif.com
+      require: public
+      version: '>=1.1.0'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.1.0
+  espressif/console_simple_init:
+    component_hash: b488b12318f3cb6e0b55b034bd12956926d45f0e1396442e820f8ece4776c306
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.1.0
   espressif/led_strip:
     component_hash: 223998f10cae6d81f2ad2dd3c1103c2221be298c708e37917482b0153f3ec64e
     dependencies:
@@ -14,8 +38,9 @@ dependencies:
       type: idf
     version: 5.5.0
 direct_dependencies:
+- espressif/console_cmd_ping
 - espressif/led_strip
 - idf
-manifest_hash: 66f0d1a5019d1277f845b61ed7ecd51b2f8a000d6fb5b32b40131928bf590fba
+manifest_hash: 35603997ce91151cd69dc4b95fa98b5b9adf3a1134474a7b772e967c7e4fbc78
 target: esp32s3
 version: 2.0.0

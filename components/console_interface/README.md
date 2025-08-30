@@ -16,13 +16,15 @@
 ### 🎛️ 命令分类
 - **系统命令**: help, info, status, reboot
 - **设备控制**: fan, bled, tled, gpio, test
-- **配置管理**: save, load, clear
+- **配置管理**: save, load, clear, config, defaults
+- **网络配置**: eth_config, eth_dhcp, eth_gateway (自动保存)
 
 ### 📊 控制台特性
 - **输入处理**: 支持退格、多行输入、字符过滤
 - **历史记录**: 支持命令历史浏览
 - **自动补全**: 支持 TAB 键自动补全
 - **错误处理**: 完善的命令错误处理机制
+- **智能保存**: 网络配置自动保存，硬件配置需手动保存
 
 ## API 接口
 
@@ -155,6 +157,34 @@ uint32_t commands_executed;
 uint64_t uptime_ms;
 console_interface_get_stats(&commands_executed, &uptime_ms);
 printf("已执行 %lu 条命令，运行 %llu ms\n", commands_executed, uptime_ms);
+```
+
+## 🔧 配置管理特性
+
+### 智能自动保存
+控制台接口实现了智能的配置保存机制：
+
+#### 自动保存的配置类型
+- **网络配置**: 以太网IP设置、DHCP服务器配置、网关设置
+- **命令**: `config set eth/dhcp/gateway` 和 `defaults eth/dhcp/gateway`
+- **特点**: 修改后立即保存到NVS，重启后保持
+
+#### 手动保存的配置类型  
+- **硬件配置**: 风扇速度、LED颜色/亮度设置
+- **命令**: `config set fan/led`
+- **特点**: 需要手动执行 `save` 命令保存
+
+### 使用示例
+
+```bash
+# 网络配置 - 自动保存
+config set dhcp true 10.10.99.101 10.10.99.110 24
+# 输出: ✅ DHCP配置已自动保存到NVS
+
+# 硬件配置 - 需手动保存
+config set fan 50 0 true
+save  # 手动保存
+# 输出: 配置已保存到NVS
 ```
 
 ## 依赖关系

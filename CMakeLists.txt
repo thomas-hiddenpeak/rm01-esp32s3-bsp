@@ -6,3 +6,10 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
 project(rm01-esp32s3-bsp)
+
+# Force linker to include all symbols from sdcard_interface component
+target_link_options(${CMAKE_PROJECT_NAME}.elf PRIVATE 
+    "-Wl,--whole-archive" 
+    "$<TARGET_FILE:__idf_sdcard_interface>" 
+    "-Wl,--no-whole-archive"
+)

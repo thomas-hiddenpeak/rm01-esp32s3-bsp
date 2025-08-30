@@ -15,3 +15,4 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/led_strip: '*'
+  espressif/console_cmd_ping: ^1.1.0

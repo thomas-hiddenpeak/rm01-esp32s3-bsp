@@ -14,6 +14,20 @@
 			"problemMatcher": [
 				"$gcc"
 			]
+		},
+		{
+			"label": "ESP32S3 Build macOS",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-c",
+				"source ~/esp/v5.5/esp-idf/export.sh && idf.py build"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
 		}
 	]
 }

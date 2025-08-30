@@ -8,7 +8,9 @@
 ## 🚀 主要特性
 
 - **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、GPIO通用操作、USB MUX切换
-- **⚡ 设备电源管理**: Orin和N305设备的电源控制和状态监控
+- **🌐 网络功能**: W5500以太网接口、DHCP服务器、网关服务、网络配置管理
+- **💾 存储功能**: TF卡（MicroSD）文件系统支持，完整的文件管理操作
+- **⚡ 设备电源管理**: AGX和LPMU设备的电源控制和状态监控
 - **📊 系统监控**: 内存监控、CPU监控、温度监控、任务状态监控  
 - **💻 控制台接口**: 统一的UART控制台，支持丰富的交互命令和配置管理
 - **🧩 组件化架构**: 模块化设计，便于扩展和维护
@@ -50,6 +52,50 @@
   - **AGX**: mux1=1, mux2=0
   - **N305**: mux1=1, mux2=1
 - 控制台命令: `usbmux esp32s3|agx|n305|status`
+
+### 以太网功能 (W5500)
+- **SPI接口**: SPI2_HOST
+- **引脚配置**:
+  - RST: GPIO 39 - 复位信号
+  - INT: GPIO 38 - 中断信号  
+  - MISO: GPIO 13 - SPI数据输入
+  - SCLK: GPIO 12 - SPI时钟
+  - MOSI: GPIO 11 - SPI数据输出
+  - CS: GPIO 10 - SPI片选
+- **网络配置**:
+  - 默认IP: 10.10.99.97
+  - 子网掩码: 255.255.255.0
+  - 网关: 10.10.99.1
+  - DNS: 8.8.8.8
+- **DHCP服务器**:
+  - IP池范围: 10.10.99.101 - 10.10.99.110
+  - 默认租期: 24小时
+  - 支持客户端跟踪和管理
+- **功能特性**:
+  - 静态IP配置
+  - DHCP服务器功能
+  - **网关服务**
+  - 网络连通性测试
+  - NVS配置持久化
+
+### TF卡存储功能 (SDMMC 4-bit)
+- **接口类型**: SDMMC 4-bit模式
+- **时钟频率**: 40MHz (高速模式)
+- **引脚配置**:
+  - CMD: GPIO 4 - 命令线
+  - CLK: GPIO 5 - 时钟线
+  - D0: GPIO 6 - 数据线0
+  - D1: GPIO 7 - 数据线1
+  - D2: GPIO 15 - 数据线2
+  - D3: GPIO 16 - 数据线3
+- **文件系统**: FAT32格式
+- **功能特性**:
+  - 自动挂载和卸载
+  - 文件和目录完整操作
+  - 空间监控和管理
+  - 格式化支持
+  - 13个专用控制台命令
+  - POSIX文件操作兼容
 
 ## 📋 如何使用
 
@@ -137,6 +183,52 @@ idf.py -p [PORT] flash monitor
 - `test quick` - 执行快速测试
 - `test stress <ms>` - 执行指定时长的压力测试
 
+#### 以太网控制命令
+- `eth_config` - 显示当前以太网配置
+  - `eth_config show` - 显示当前以太网配置
+  - `eth_config reload` - 从NVS重新载入配置
+- `eth_status` - 显示以太网接口详细状态信息
+- `eth_reset` - 重置以太网接口
+- `eth_ping <IP>` - ping测试网络连通性（例：`eth_ping 8.8.8.8`）
+- `eth_test` - 测试W5500芯片SPI通信
+
+#### DHCP服务器控制命令
+- `eth_dhcp` - 显示DHCP服务器状态和客户端列表
+  - `eth_dhcp status` - 显示DHCP服务器状态
+  - `eth_dhcp start` - 启动DHCP服务器
+  - `eth_dhcp stop` - 停止DHCP服务器
+  - `eth_dhcp restart` - 重启DHCP服务器
+
+#### 网关服务控制命令
+- `eth_gateway status` - 显示网关服务状态
+- `eth_gateway start` - 启动网关服务
+- `eth_gateway stop` - 停止网关服务
+
+#### TF卡存储控制命令（13个命令）
+
+**基本管理命令**:
+- `sdcard_mount [path]` - 挂载TF卡到文件系统（默认/sdcard）
+- `sdcard_unmount` - 安全卸载TF卡
+- `sdcard_info` - 显示TF卡详细信息（容量、使用率等）
+- `sdcard_ls [path]` - 列出目录内容（增强版，显示文件大小和类型）
+- `sdcard_format` - 格式化TF卡为FAT32 ⚠️危险操作
+
+**文件操作命令**:
+- `sdcard_cat <file>` - 查看文件内容
+- `sdcard_write <file> <content>` - 写入内容到文件
+- `sdcard_append <file> <content>` - 追加内容到文件（带时间戳）
+- `sdcard_rm <file>` - 删除文件
+- `sdcard_cp <src> <dst>` - 复制文件
+
+**目录操作命令**:
+- `sdcard_mkdir <dir>` - 创建目录
+- `sdcard_rmdir <dir>` - 删除空目录
+
+**信息查询命令**:
+- `sdcard_stat <path>` - 显示文件/目录详细信息
+
+> 📖 **详细使用手册**: 请参考 `markdown/SDCARD_CONSOLE_COMMANDS.md` 获取完整的TF卡命令使用指南和示例
+
 ## 📁 项目结构
 
 ```
@@ -150,6 +242,8 @@ idf.py -p [PORT] flash monitor
 │   ├── hardware_control/       硬件控制组件
 │   ├── system_monitor/         系统监控组件
 │   ├── device_interface/       设备接口组件
+│   ├── ethernet_interface/     以太网接口组件
+│   ├── sdcard_interface/       TF卡存储接口组件
 │   └── console_interface/      控制台接口组件
 ├── managed_components/         托管组件
 │   └── espressif__led_strip/   LED条带驱动
@@ -157,6 +251,7 @@ idf.py -p [PORT] flash monitor
     ├── PROJECT_SUMMARY.md      项目总结
     ├── CONSOLE_GUIDE.md        控制台使用指南
     ├── USB_MUX_CONTROL_GUIDE.md USB MUX控制功能指南
+    ├── SDCARD_CONSOLE_COMMANDS.md TF卡控制台命令完整参考
     └── README_COMPONENTS.md    组件说明文档
 ```
 
@@ -167,7 +262,9 @@ idf.py -p [PORT] flash monitor
 1. **hardware_control**: 硬件抽象层，提供PWM、GPIO、LED等硬件接口
 2. **system_monitor**: 系统监控，包括内存、CPU、温度等状态监控
 3. **device_interface**: 统一设备接口，整合硬件控制和系统监控
-4. **console_interface**: 控制台接口，提供UART命令行交互
+4. **ethernet_interface**: 以太网接口，提供W5500网络功能、DHCP服务器和网关服务
+5. **sdcard_interface**: TF卡存储接口，提供文件系统管理和存储操作
+6. **console_interface**: 控制台接口，提供UART命令行交互
 
 ### 设计特点
 
@@ -195,6 +292,30 @@ idf.py -p [PORT] flash monitor
 * 检查GPIO引脚配置
 * 确认LED供电正常
 * 检查WS2812时序是否正确
+
+### 以太网连接问题
+
+* 检查W5500硬件连接：确认SPI引脚连接正确
+* 网络配置：使用 `eth_config` 查看当前配置
+* 连接状态：使用 `eth_status` 检查以太网接口状态
+* 硬件测试：使用 `eth_test` 验证W5500 SPI通信
+* DHCP问题：使用 `eth_dhcp status` 检查DHCP服务器状态
+
+### 网络连通性问题
+
+* 使用 `eth_ping <IP>` 测试网络连通性
+* 检查网线连接和网络设备状态
+* 确认IP地址配置是否与网络环境匹配
+* 检查防火墙设置是否阻止连接
+
+### TF卡存储问题
+
+* 检查TF卡硬件连接：确认SDMMC引脚连接正确（GPIO 4,5,6,7,15,16）
+* 卡片兼容性：使用Class 10或更高级别的TF卡，容量建议32GB以下
+* 格式检查：确保TF卡已格式化为FAT32格式
+* 挂载状态：使用 `sdcard_info` 检查挂载状态和容量信息
+* 文件操作：使用 `sdcard_ls` 验证文件系统是否正常
+* 重新挂载：如遇问题，先 `sdcard_unmount` 再 `sdcard_mount`
 
 ## 🔗 技术支持
 

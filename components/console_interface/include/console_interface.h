@@ -120,6 +120,24 @@ esp_err_t console_interface_register_system_commands(void);
 esp_err_t console_interface_register_config_commands(void);
 
 /**
+ * @brief Register ethernet commands
+ * 
+ * This function registers ethernet-related commands like config, dhcp, gateway, ping.
+ * 
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t console_interface_register_ethernet_commands(void);
+
+/**
+ * @brief Register SD card commands
+ * 
+ * This function registers SD card-related commands like mount, unmount, info, ls, format.
+ * 
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t console_interface_register_sdcard_commands(void);
+
+/**
  * @brief Execute a console command programmatically
  * 
  * @param command Command string to execute

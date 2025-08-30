@@ -48,8 +48,8 @@ esp_err_t hardware_control_init(void)
     s_hardware_status.board_led_brightness = DEFAULT_LED_BRIGHTNESS;
     s_hardware_status.touch_led_brightness = DEFAULT_LED_BRIGHTNESS;
     s_hardware_status.usb_mux_target = USB_MUX_ESP32S3; // 默认连接到ESP32S3
-    s_hardware_status.orin_power_state = POWER_STATE_UNKNOWN;
-    s_hardware_status.n305_power_state = POWER_STATE_UNKNOWN;
+    s_hardware_status.agx_power_state = POWER_STATE_UNKNOWN;
+    s_hardware_status.lpmu_power_state = POWER_STATE_UNKNOWN;
 
     // 初始化风扇PWM
     esp_err_t ret = init_fan_pwm();
@@ -422,7 +422,7 @@ esp_err_t usb_mux_set_target(usb_mux_target_t target)
             mux1_state = GPIO_STATE_HIGH;
             mux2_state = GPIO_STATE_LOW;
             break;
-        case USB_MUX_N305:     // mux1=1, mux2=1
+        case USB_MUX_LPMU:     // mux1=1, mux2=1
             mux1_state = GPIO_STATE_HIGH;
             mux2_state = GPIO_STATE_HIGH;
             break;
@@ -476,8 +476,8 @@ const char *usb_mux_get_target_name(usb_mux_target_t target)
             return "ESP32S3";
         case USB_MUX_AGX:
             return "AGX";
-        case USB_MUX_N305:
-            return "N305";
+        case USB_MUX_LPMU:
+            return "LPMU";
         default:
             return "Unknown";
     }
@@ -485,119 +485,119 @@ const char *usb_mux_get_target_name(usb_mux_target_t target)
 
 // ==================== 电源控制接口实现 ====================
 
-esp_err_t orin_power_on(void)
+esp_err_t agx_power_on(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
-
-    esp_err_t ret = gpio_set_output(ORIN_POWER_PIN, GPIO_STATE_LOW);
+    
+    esp_err_t ret = gpio_set_output(AGX_POWER_PIN, GPIO_STATE_LOW);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to power on Orin: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to power on AGX: %s", esp_err_to_name(ret));
         return ret;
     }
-
-    s_hardware_status.orin_power_state = POWER_STATE_ON;
-    ESP_LOGI(TAG, "Orin powered on (GPIO%d set to LOW)", ORIN_POWER_PIN);
+    
+    s_hardware_status.agx_power_state = POWER_STATE_ON;
+    ESP_LOGI(TAG, "AGX powered on (GPIO%d set to LOW)", AGX_POWER_PIN);
     return ESP_OK;
 }
 
-esp_err_t orin_power_off(void)
+esp_err_t agx_power_off(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = gpio_set_output(ORIN_POWER_PIN, GPIO_STATE_HIGH);
+    esp_err_t ret = gpio_set_output(AGX_POWER_PIN, GPIO_STATE_HIGH);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to power off Orin: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to power off AGX: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    s_hardware_status.orin_power_state = POWER_STATE_OFF;
-    ESP_LOGI(TAG, "Orin powered off (GPIO%d set to HIGH)", ORIN_POWER_PIN);
+    s_hardware_status.agx_power_state = POWER_STATE_OFF;
+    ESP_LOGI(TAG, "AGX powered off (GPIO%d set to HIGH)", AGX_POWER_PIN);
     return ESP_OK;
 }
 
-esp_err_t orin_reset(void)
+esp_err_t agx_reset(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Resetting Orin device");
+    ESP_LOGI(TAG, "Resetting AGX device");
     
     // 拉高重启引脚
-    esp_err_t ret = gpio_set_output(ORIN_RESET_PIN, GPIO_STATE_HIGH);
+    esp_err_t ret = gpio_set_output(AGX_RESET_PIN, GPIO_STATE_HIGH);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set Orin reset pin high: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set AGX reset pin high: %s", esp_err_to_name(ret));
         return ret;
     }
 
     // 保持1000ms
-    vTaskDelay(pdMS_TO_TICKS(ORIN_RESET_PULSE_MS));
+    vTaskDelay(pdMS_TO_TICKS(AGX_RESET_PULSE_MS));
 
     // 拉低重启引脚
-    ret = gpio_set_output(ORIN_RESET_PIN, GPIO_STATE_LOW);
+    ret = gpio_set_output(AGX_RESET_PIN, GPIO_STATE_LOW);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set Orin reset pin low: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set AGX reset pin low: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "Orin reset completed");
+    ESP_LOGI(TAG, "AGX reset completed");
     return ESP_OK;
 }
 
-esp_err_t orin_enter_recovery_mode(void)
+esp_err_t agx_enter_recovery_mode(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Entering Orin recovery mode");
+    ESP_LOGI(TAG, "Entering AGX recovery mode");
     
     // 步骤1: 将GPIO40拉高并保持1000ms
-    ESP_LOGI(TAG, "Step 1: Setting GPIO%d (recovery pin) HIGH", ORIN_RECOVERY_PIN);
-    // esp_err_t ret = gpio_set_direction(ORIN_RECOVERY_PIN, GPIO_MODE_OUTPUT);
+    ESP_LOGI(TAG, "Step 1: Setting GPIO%d (recovery pin) HIGH", AGX_RECOVERY_PIN);
+    // esp_err_t ret = gpio_set_direction(AGX_RECOVERY_PIN, GPIO_MODE_OUTPUT);
     // if (ret != ESP_OK) {
-    //     ESP_LOGE(TAG, "Failed to configure GPIO%d as output: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+    //     ESP_LOGE(TAG, "Failed to configure GPIO%d as output: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
     //     return ret;
     // }
     
-    esp_err_t ret = gpio_set_level(ORIN_RECOVERY_PIN, GPIO_STATE_HIGH);
+    esp_err_t ret = gpio_set_level(AGX_RECOVERY_PIN, GPIO_STATE_HIGH);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set GPIO%d level HIGH: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set GPIO%d level HIGH: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ret;
     }
     
     // 注意：不进行状态验证，避免干扰GPIO状态
-    ESP_LOGI(TAG, "GPIO%d set to HIGH, holding for 1000ms...", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "GPIO%d set to HIGH, holding for 1000ms...", AGX_RECOVERY_PIN);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 步骤2: 重启Orin并等待1000ms
-    ESP_LOGI(TAG, "Step 2: Executing Orin reset");
-    ret = orin_reset();
+    // 步骤2: 重启AGX并等待1000ms
+    ESP_LOGI(TAG, "Step 2: Executing AGX reset");
+    ret = agx_reset();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset Orin during recovery mode entry");
+        ESP_LOGE(TAG, "Failed to reset AGX during recovery mode entry");
         return ret;
     }
-    ESP_LOGI(TAG, "Orin reset completed, waiting 1000ms");
+    ESP_LOGI(TAG, "AGX reset completed, waiting 1000ms");
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // 步骤3: 将GPIO40拉低
-    ESP_LOGI(TAG, "Step 3: Setting GPIO%d (recovery pin) LOW", ORIN_RECOVERY_PIN);
-    ret = gpio_set_level(ORIN_RECOVERY_PIN, 0);
+    ESP_LOGI(TAG, "Step 3: Setting GPIO%d (recovery pin) LOW", AGX_RECOVERY_PIN);
+    ret = gpio_set_level(AGX_RECOVERY_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set GPIO%d level LOW: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set GPIO%d level LOW: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ret;
     }
     
     // 注意：不进行状态验证，避免干扰GPIO状态
-    ESP_LOGI(TAG, "GPIO%d set to LOW", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "GPIO%d set to LOW", AGX_RECOVERY_PIN);
 
     // 步骤4: 切换USB MUX到AGX
     ESP_LOGI(TAG, "Step 4: Switching USB MUX to AGX");
@@ -607,79 +607,79 @@ esp_err_t orin_enter_recovery_mode(void)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Orin recovery mode entry completed successfully");
+    ESP_LOGI(TAG, "AGX recovery mode entry completed successfully");
     return ESP_OK;
 }
 
-esp_err_t n305_power_toggle(void)
+esp_err_t lpmu_power_toggle(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Toggling N305 power");
+    ESP_LOGI(TAG, "Toggling LPMU power");
     
     // 拉高电源按钮引脚
-    esp_err_t ret = gpio_set_output(N305_POWER_BTN_PIN, GPIO_STATE_HIGH);
+    esp_err_t ret = gpio_set_output(LPMU_POWER_BTN_PIN, GPIO_STATE_HIGH);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set N305 power button high: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set LPMU power button high: %s", esp_err_to_name(ret));
         return ret;
     }
 
     // 保持300ms
-    vTaskDelay(pdMS_TO_TICKS(N305_POWER_PULSE_MS));
+    vTaskDelay(pdMS_TO_TICKS(LPMU_POWER_PULSE_MS));
 
     // 拉低电源按钮引脚
-    ret = gpio_set_output(N305_POWER_BTN_PIN, GPIO_STATE_LOW);
+    ret = gpio_set_output(LPMU_POWER_BTN_PIN, GPIO_STATE_LOW);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set N305 power button low: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set LPMU power button low: %s", esp_err_to_name(ret));
         return ret;
     }
 
     // 切换电源状态
-    if (s_hardware_status.n305_power_state == POWER_STATE_ON) {
-        s_hardware_status.n305_power_state = POWER_STATE_OFF;
-        ESP_LOGI(TAG, "N305 power toggled to OFF");
+    if (s_hardware_status.lpmu_power_state == POWER_STATE_ON) {
+        s_hardware_status.lpmu_power_state = POWER_STATE_OFF;
+        ESP_LOGI(TAG, "LPMU power toggled to OFF");
     } else {
-        s_hardware_status.n305_power_state = POWER_STATE_ON;
-        ESP_LOGI(TAG, "N305 power toggled to ON");
+        s_hardware_status.lpmu_power_state = POWER_STATE_ON;
+        ESP_LOGI(TAG, "LPMU power toggled to ON");
     }
 
     return ESP_OK;
 }
 
-esp_err_t n305_reset(void)
+esp_err_t lpmu_reset(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Resetting N305 device");
+    ESP_LOGI(TAG, "Resetting LPMU device");
     
     // 拉高重启引脚
-    esp_err_t ret = gpio_set_output(N305_RESET_PIN, GPIO_STATE_HIGH);
+    esp_err_t ret = gpio_set_output(LPMU_RESET_PIN, GPIO_STATE_HIGH);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set N305 reset pin high: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set LPMU reset pin high: %s", esp_err_to_name(ret));
         return ret;
     }
 
     // 保持300ms
-    vTaskDelay(pdMS_TO_TICKS(N305_RESET_PULSE_MS));
+    vTaskDelay(pdMS_TO_TICKS(LPMU_RESET_PULSE_MS));
 
     // 拉低重启引脚
-    ret = gpio_set_output(N305_RESET_PIN, GPIO_STATE_LOW);
+    ret = gpio_set_output(LPMU_RESET_PIN, GPIO_STATE_LOW);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set N305 reset pin low: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set LPMU reset pin low: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "N305 reset completed");
+    ESP_LOGI(TAG, "LPMU reset completed");
     return ESP_OK;
 }
 
-esp_err_t orin_get_power_state(power_state_t *state)
+esp_err_t agx_get_power_state(power_state_t *state)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
@@ -691,11 +691,11 @@ esp_err_t orin_get_power_state(power_state_t *state)
         return ESP_ERR_INVALID_ARG;
     }
 
-    *state = s_hardware_status.orin_power_state;
+    *state = s_hardware_status.agx_power_state;
     return ESP_OK;
 }
 
-esp_err_t n305_get_power_state(power_state_t *state)
+esp_err_t lpmu_get_power_state(power_state_t *state)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
@@ -707,7 +707,7 @@ esp_err_t n305_get_power_state(power_state_t *state)
         return ESP_ERR_INVALID_ARG;
     }
 
-    *state = s_hardware_status.n305_power_state;
+    *state = s_hardware_status.lpmu_power_state;
     return ESP_OK;
 }
 
@@ -877,85 +877,85 @@ esp_err_t hardware_test_all(void)
     return ESP_OK;
 }
 
-esp_err_t hardware_test_orin_power(void)
+esp_err_t hardware_test_agx_power(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Starting Orin power control test");
+    ESP_LOGI(TAG, "Starting AGX power control test");
     
     // 测试开机
-    ESP_LOGI(TAG, "Testing Orin power on");
-    esp_err_t ret = orin_power_on();
+    ESP_LOGI(TAG, "Testing AGX power on");
+    esp_err_t ret = agx_power_on();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Orin power on test failed");
+        ESP_LOGE(TAG, "AGX power on test failed");
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
     
     // 测试关机
-    ESP_LOGI(TAG, "Testing Orin power off");
-    ret = orin_power_off();
+    ESP_LOGI(TAG, "Testing AGX power off");
+    ret = agx_power_off();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Orin power off test failed");
+        ESP_LOGE(TAG, "AGX power off test failed");
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
     
-    ESP_LOGI(TAG, "Orin power control test completed successfully");
+    ESP_LOGI(TAG, "AGX power control test completed successfully");
     return ESP_OK;
 }
 
-esp_err_t hardware_test_n305_power(void)
+esp_err_t hardware_test_lpmu_power(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Starting N305 power control test");
+    ESP_LOGI(TAG, "Starting LPMU power control test");
     
     // 测试电源切换
-    ESP_LOGI(TAG, "Testing N305 power toggle");
-    esp_err_t ret = n305_power_toggle();
+    ESP_LOGI(TAG, "Testing LPMU power toggle");
+    esp_err_t ret = lpmu_power_toggle();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "N305 power toggle test failed");
+        ESP_LOGE(TAG, "LPMU power toggle test failed");
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(3000));
     
     // 再次切换
-    ESP_LOGI(TAG, "Testing N305 power toggle again");
-    ret = n305_power_toggle();
+    ESP_LOGI(TAG, "Testing LPMU power toggle again");
+    ret = lpmu_power_toggle();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "N305 power toggle test failed");
+        ESP_LOGE(TAG, "LPMU power toggle test failed");
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(3000));
     
-    ESP_LOGI(TAG, "N305 power control test completed successfully");
+    ESP_LOGI(TAG, "LPMU power control test completed successfully");
     return ESP_OK;
 }
 
-esp_err_t hardware_test_orin_recovery_gpio(void)
+esp_err_t hardware_test_agx_recovery_gpio(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Hardware control not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Starting comprehensive GPIO%d diagnostics", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "Starting comprehensive GPIO%d diagnostics", AGX_RECOVERY_PIN);
     
     // 步骤1: 检查GPIO有效性
-    if (ORIN_RECOVERY_PIN < 0 || ORIN_RECOVERY_PIN >= SOC_GPIO_PIN_COUNT) {
-        ESP_LOGE(TAG, "GPIO%d is out of valid range (0-%d)", ORIN_RECOVERY_PIN, SOC_GPIO_PIN_COUNT-1);
+    if (AGX_RECOVERY_PIN < 0 || AGX_RECOVERY_PIN >= SOC_GPIO_PIN_COUNT) {
+        ESP_LOGE(TAG, "GPIO%d is out of valid range (0-%d)", AGX_RECOVERY_PIN, SOC_GPIO_PIN_COUNT-1);
         return ESP_FAIL;
     }
     
     // 步骤2: 如果是GPIO40，特别处理JTAG问题
-    if (ORIN_RECOVERY_PIN == 40) {
+    if (AGX_RECOVERY_PIN == 40) {
         ESP_LOGI(TAG, "GPIO40 detected - performing JTAG disable and verification");
         esp_err_t ret = disable_jtag_for_gpio40();
         if (ret != ESP_OK) {
@@ -964,106 +964,106 @@ esp_err_t hardware_test_orin_recovery_gpio(void)
         }
     } else {
         // 步骤2: 重置GPIO配置
-        ESP_LOGI(TAG, "Resetting GPIO%d configuration", ORIN_RECOVERY_PIN);
-        esp_err_t ret = gpio_reset_pin(ORIN_RECOVERY_PIN);
+        ESP_LOGI(TAG, "Resetting GPIO%d configuration", AGX_RECOVERY_PIN);
+        esp_err_t ret = gpio_reset_pin(AGX_RECOVERY_PIN);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to reset GPIO%d: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+            ESP_LOGE(TAG, "Failed to reset GPIO%d: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
             return ESP_FAIL;
         }
         vTaskDelay(pdMS_TO_TICKS(100)); // 给硬件一点时间
     }
     
     // 步骤3: 配置为输出模式（带详细配置）
-    ESP_LOGI(TAG, "Configuring GPIO%d as output with detailed settings", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "Configuring GPIO%d as output with detailed settings", AGX_RECOVERY_PIN);
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << ORIN_RECOVERY_PIN),
+        .pin_bit_mask = (1ULL << AGX_RECOVERY_PIN),
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE
     };
     esp_err_t ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure GPIO%d: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure GPIO%d: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "GPIO%d configured successfully", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "GPIO%d configured successfully", AGX_RECOVERY_PIN);
     
     // 步骤4: 测试LOW状态
-    ESP_LOGI(TAG, "Testing LOW state on GPIO%d", ORIN_RECOVERY_PIN);
-    ret = gpio_set_level(ORIN_RECOVERY_PIN, 0);
+    ESP_LOGI(TAG, "Testing LOW state on GPIO%d", AGX_RECOVERY_PIN);
+    ret = gpio_set_level(AGX_RECOVERY_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set GPIO%d LOW: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set GPIO%d LOW: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    int level = gpio_get_level(ORIN_RECOVERY_PIN);
+    int level = gpio_get_level(AGX_RECOVERY_PIN);
     ESP_LOGI(TAG, "GPIO%d LOW test - Expected: 0, Got: %d %s", 
-             ORIN_RECOVERY_PIN, level, (level == 0) ? "[PASS]" : "[FAIL]");
+             AGX_RECOVERY_PIN, level, (level == 0) ? "[PASS]" : "[FAIL]");
     
     // 步骤5: 测试HIGH状态
-    ESP_LOGI(TAG, "Testing HIGH state on GPIO%d", ORIN_RECOVERY_PIN);
-    ret = gpio_set_level(ORIN_RECOVERY_PIN, 1);
+    ESP_LOGI(TAG, "Testing HIGH state on GPIO%d", AGX_RECOVERY_PIN);
+    ret = gpio_set_level(AGX_RECOVERY_PIN, 1);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set GPIO%d HIGH: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set GPIO%d HIGH: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    level = gpio_get_level(ORIN_RECOVERY_PIN);
+    level = gpio_get_level(AGX_RECOVERY_PIN);
     ESP_LOGI(TAG, "GPIO%d HIGH test - Expected: 1, Got: %d %s", 
-             ORIN_RECOVERY_PIN, level, (level == 1) ? "[PASS]" : "[FAIL]");
+             AGX_RECOVERY_PIN, level, (level == 1) ? "[PASS]" : "[FAIL]");
     
     if (level != 1) {
-        ESP_LOGE(TAG, "GPIO%d HIGH state failed! This may indicate:", ORIN_RECOVERY_PIN);
+        ESP_LOGE(TAG, "GPIO%d HIGH state failed! This may indicate:", AGX_RECOVERY_PIN);
         ESP_LOGE(TAG, "1. Hardware short to ground");
         ESP_LOGE(TAG, "2. External pull-down resistor");
-        ESP_LOGE(TAG, "3. GPIO%d connected to low-impedance load", ORIN_RECOVERY_PIN);
-        ESP_LOGE(TAG, "4. GPIO%d multiplexed with other functions", ORIN_RECOVERY_PIN);
+        ESP_LOGE(TAG, "3. GPIO%d connected to low-impedance load", AGX_RECOVERY_PIN);
+        ESP_LOGE(TAG, "4. GPIO%d multiplexed with other functions", AGX_RECOVERY_PIN);
         
         // 尝试使能内部上拉
-        ESP_LOGI(TAG, "Attempting to enable internal pull-up on GPIO%d", ORIN_RECOVERY_PIN);
-        gpio_pullup_en(ORIN_RECOVERY_PIN);
+        ESP_LOGI(TAG, "Attempting to enable internal pull-up on GPIO%d", AGX_RECOVERY_PIN);
+        gpio_pullup_en(AGX_RECOVERY_PIN);
         vTaskDelay(pdMS_TO_TICKS(100));
         
-        level = gpio_get_level(ORIN_RECOVERY_PIN);
+        level = gpio_get_level(AGX_RECOVERY_PIN);
         ESP_LOGI(TAG, "GPIO%d with pull-up - Got: %d %s", 
-                 ORIN_RECOVERY_PIN, level, (level == 1) ? "[PASS]" : "[STILL FAIL]");
+                 AGX_RECOVERY_PIN, level, (level == 1) ? "[PASS]" : "[STILL FAIL]");
         
         if (level == 1) {
-            ESP_LOGW(TAG, "GPIO%d works with internal pull-up. External load may be too strong.", ORIN_RECOVERY_PIN);
+            ESP_LOGW(TAG, "GPIO%d works with internal pull-up. External load may be too strong.", AGX_RECOVERY_PIN);
         }
         
         return ESP_FAIL;
     }
     
     // 步骤6: 测试持续时间
-    ESP_LOGI(TAG, "Testing 1000ms HIGH duration on GPIO%d", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "Testing 1000ms HIGH duration on GPIO%d", AGX_RECOVERY_PIN);
     for (int i = 0; i < 10; i++) {
         vTaskDelay(pdMS_TO_TICKS(100));
-        level = gpio_get_level(ORIN_RECOVERY_PIN);
+        level = gpio_get_level(AGX_RECOVERY_PIN);
         if (level != 1) {
-            ESP_LOGE(TAG, "GPIO%d lost HIGH state after %dms! Got: %d", ORIN_RECOVERY_PIN, (i+1)*100, level);
+            ESP_LOGE(TAG, "GPIO%d lost HIGH state after %dms! Got: %d", AGX_RECOVERY_PIN, (i+1)*100, level);
             return ESP_FAIL;
         }
     }
-    ESP_LOGI(TAG, "GPIO%d maintained HIGH for 1000ms [PASS]", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "GPIO%d maintained HIGH for 1000ms [PASS]", AGX_RECOVERY_PIN);
     
     // 步骤7: 恢复LOW状态
-    ESP_LOGI(TAG, "Setting GPIO%d back to LOW", ORIN_RECOVERY_PIN);
-    ret = gpio_set_level(ORIN_RECOVERY_PIN, 0);
+    ESP_LOGI(TAG, "Setting GPIO%d back to LOW", AGX_RECOVERY_PIN);
+    ret = gpio_set_level(AGX_RECOVERY_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set GPIO%d LOW: %s", ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set GPIO%d LOW: %s", AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    level = gpio_get_level(ORIN_RECOVERY_PIN);
+    level = gpio_get_level(AGX_RECOVERY_PIN);
     ESP_LOGI(TAG, "Final GPIO%d LOW test - Expected: 0, Got: %d %s", 
-             ORIN_RECOVERY_PIN, level, (level == 0) ? "[PASS]" : "[FAIL]");
+             AGX_RECOVERY_PIN, level, (level == 0) ? "[PASS]" : "[FAIL]");
     
-    ESP_LOGI(TAG, "GPIO%d comprehensive diagnostics completed", ORIN_RECOVERY_PIN);
+    ESP_LOGI(TAG, "GPIO%d comprehensive diagnostics completed", AGX_RECOVERY_PIN);
     return ESP_OK;
 }
 
@@ -1105,8 +1105,8 @@ esp_err_t hardware_print_status(void)
            s_hardware_status.touch_led_color.blue,
            s_hardware_status.touch_led_brightness);
     printf("USB MUX目标: %s\n", usb_mux_get_target_name(s_hardware_status.usb_mux_target));
-    printf("Orin电源状态: %s\n", power_state_get_name(s_hardware_status.orin_power_state));
-    printf("N305电源状态: %s\n", power_state_get_name(s_hardware_status.n305_power_state));
+    printf("AGX电源状态: %s\n", power_state_get_name(s_hardware_status.agx_power_state));
+    printf("LPMU电源状态: %s\n", power_state_get_name(s_hardware_status.lpmu_power_state));
     printf("初始化状态: %s\n", s_hardware_status.initialized ? "已初始化" : "未初始化");
     printf("================\n");
     
@@ -1237,7 +1237,7 @@ static esp_err_t init_power_control_gpio(void)
     esp_err_t ret;
 
     // 如果使用GPIO40，需要先禁用JTAG功能
-    if (ORIN_RECOVERY_PIN == 40) {
+    if (AGX_RECOVERY_PIN == 40) {
         ret = disable_jtag_for_gpio40();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to disable JTAG for GPIO40: %s", esp_err_to_name(ret));
@@ -1245,18 +1245,18 @@ static esp_err_t init_power_control_gpio(void)
         }
     }
 
-    // 配置Orin电源控制引脚
-    ret = gpio_set_direction(ORIN_POWER_PIN, GPIO_MODE_OUTPUT);
+    // 配置AGX电源控制引脚
+    ret = gpio_set_direction(AGX_POWER_PIN, GPIO_MODE_OUTPUT);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure Orin power GPIO%d as output: %s", 
-                 ORIN_POWER_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure AGX power GPIO%d as output: %s", 
+                 AGX_POWER_PIN, esp_err_to_name(ret));
         return ret;
     }
 
-    ret = gpio_set_direction(ORIN_RESET_PIN, GPIO_MODE_OUTPUT);
+    ret = gpio_set_direction(AGX_RESET_PIN, GPIO_MODE_OUTPUT);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure Orin reset GPIO%d as output: %s", 
-                 ORIN_RESET_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure AGX reset GPIO%d as output: %s", 
+                 AGX_RESET_PIN, esp_err_to_name(ret));
         return ret;
     }
 
@@ -1264,77 +1264,77 @@ static esp_err_t init_power_control_gpio(void)
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << ORIN_RECOVERY_PIN),
+        .pin_bit_mask = (1ULL << AGX_RECOVERY_PIN),
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE
     };
     ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure Orin recovery GPIO%d as output: %s", 
-                 ORIN_RECOVERY_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure AGX recovery GPIO%d as output: %s", 
+                 AGX_RECOVERY_PIN, esp_err_to_name(ret));
         return ret;
     }
 
-    // 配置N305电源控制引脚
-    ret = gpio_set_direction(N305_POWER_BTN_PIN, GPIO_MODE_OUTPUT);
+    // 配置LPMU电源控制引脚
+    ret = gpio_set_direction(LPMU_POWER_BTN_PIN, GPIO_MODE_OUTPUT);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure N305 power button GPIO%d as output: %s", 
-                 N305_POWER_BTN_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure LPMU power button GPIO%d as output: %s", 
+                 LPMU_POWER_BTN_PIN, esp_err_to_name(ret));
         return ret;
     }
 
-    ret = gpio_set_direction(N305_RESET_PIN, GPIO_MODE_OUTPUT);
+    ret = gpio_set_direction(LPMU_RESET_PIN, GPIO_MODE_OUTPUT);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure N305 reset GPIO%d as output: %s", 
-                 N305_RESET_PIN, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure LPMU reset GPIO%d as output: %s", 
+                 LPMU_RESET_PIN, esp_err_to_name(ret));
         return ret;
     }
 
     // 设置初始状态
-    // Orin默认开机状态 (GPIO3 = LOW)
-    ret = gpio_set_level(ORIN_POWER_PIN, 0);
+    // AGX默认开机状态 (GPIO3 = LOW)
+    ret = gpio_set_level(AGX_POWER_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set Orin power pin initial level: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set AGX power pin initial level: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // Orin重启引脚默认为低
-    ret = gpio_set_level(ORIN_RESET_PIN, 0);
+    // AGX重启引脚默认为低
+    ret = gpio_set_level(AGX_RESET_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set Orin reset pin initial level: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set AGX reset pin initial level: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // Orin恢复模式引脚默认为低
-    ret = gpio_set_level(ORIN_RECOVERY_PIN, 0);
+    // AGX恢复模式引脚默认为低
+    ret = gpio_set_level(AGX_RECOVERY_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set Orin recovery pin initial level: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set AGX recovery pin initial level: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // N305电源按钮默认为低
-    ret = gpio_set_level(N305_POWER_BTN_PIN, 0);
+    // LPMU电源按钮默认为低
+    ret = gpio_set_level(LPMU_POWER_BTN_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set N305 power button initial level: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set LPMU power button initial level: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // N305重启引脚默认为低
-    ret = gpio_set_level(N305_RESET_PIN, 0);
+    // LPMU重启引脚默认为低
+    ret = gpio_set_level(LPMU_RESET_PIN, 0);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set N305 reset pin initial level: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set LPMU reset pin initial level: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // 更新状态（默认Orin开机状态）
-    s_hardware_status.orin_power_state = POWER_STATE_ON;
-    s_hardware_status.n305_power_state = POWER_STATE_UNKNOWN;
+    // 更新状态（默认AGX开机状态）
+    s_hardware_status.agx_power_state = POWER_STATE_ON;
+    s_hardware_status.lpmu_power_state = POWER_STATE_UNKNOWN;
 
     ESP_LOGI(TAG, "Power control GPIO initialized");
-    ESP_LOGI(TAG, "Orin - Power: GPIO%d, Reset: GPIO%d, Recovery: GPIO%d", 
-             ORIN_POWER_PIN, ORIN_RESET_PIN, ORIN_RECOVERY_PIN);
-    ESP_LOGI(TAG, "N305 - Power: GPIO%d, Reset: GPIO%d", 
-             N305_POWER_BTN_PIN, N305_RESET_PIN);
+    ESP_LOGI(TAG, "AGX - Power: GPIO%d, Reset: GPIO%d, Recovery: GPIO%d", 
+             AGX_POWER_PIN, AGX_RESET_PIN, AGX_RECOVERY_PIN);
+    ESP_LOGI(TAG, "LPMU - Power: GPIO%d, Reset: GPIO%d", 
+             LPMU_POWER_BTN_PIN, LPMU_RESET_PIN);
     
     return ESP_OK;
 }

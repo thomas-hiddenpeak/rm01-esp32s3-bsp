@@ -43,19 +43,19 @@ extern "C" {
 #define ESP32_MUX1_SEL      8       // USB MUX1选择引脚 (GPIO8)
 #define ESP32_MUX2_SEL      48      // USB MUX2选择引脚 (GPIO48)
 
-// Orin电源控制引脚
-#define ORIN_POWER_PIN      3       // Orin关机引脚 (GPIO3)
-#define ORIN_RESET_PIN      1       // Orin重启引脚 (GPIO1)
-#define ORIN_RECOVERY_PIN   40      // Orin恢复模式引脚 (GPIO40)
+// AGX电源控制引脚
+#define AGX_POWER_PIN      3       // AGX关机引脚 (GPIO3)
+#define AGX_RESET_PIN      1       // AGX重启引脚 (GPIO1)
+#define AGX_RECOVERY_PIN   40      // AGX恢复模式引脚 (GPIO40)
 
-// N305电源控制引脚
-#define N305_POWER_BTN_PIN  46      // N305电源按钮引脚 (GPIO46)
-#define N305_RESET_PIN      2       // N305重启引脚 (GPIO2)
+// LPMU电源控制引脚
+#define LPMU_POWER_BTN_PIN  46      // LPMU电源按钮引脚 (GPIO46)
+#define LPMU_RESET_PIN      2       // LPMU重启引脚 (GPIO2)
 
 // 电源控制时序配置
-#define ORIN_RESET_PULSE_MS     1000    // Orin重启脉冲持续时间(毫秒)
-#define N305_POWER_PULSE_MS     300     // N305电源按钮脉冲持续时间(毫秒)
-#define N305_RESET_PULSE_MS     300     // N305重启脉冲持续时间(毫秒)
+#define AGX_RESET_PULSE_MS     1000    // AGX重启脉冲持续时间(毫秒)
+#define LPMU_POWER_PULSE_MS     300     // LPMU电源按钮脉冲持续时间(毫秒)
+#define LPMU_RESET_PULSE_MS     300     // LPMU重启脉冲持续时间(毫秒)
 
 // ==================== 类型定义 ====================
 
@@ -90,7 +90,7 @@ typedef enum {
 typedef enum {
     USB_MUX_ESP32S3 = 0,    ///< 连接到ESP32S3
     USB_MUX_AGX = 1,        ///< 连接到AGX
-    USB_MUX_N305 = 2        ///< 连接到N305
+    USB_MUX_LPMU = 2        ///< 连接到LPMU
 } usb_mux_target_t;
 
 /**
@@ -113,8 +113,8 @@ typedef struct {
     led_color_t touch_led_color;        ///< 触摸LED颜色
     uint8_t touch_led_brightness;       ///< 触摸LED亮度 (0-100%)
     usb_mux_target_t usb_mux_target;    ///< USB MUX目标
-    power_state_t orin_power_state;     ///< Orin电源状态
-    power_state_t n305_power_state;     ///< N305电源状态
+    power_state_t agx_power_state;     ///< AGX电源状态
+    power_state_t lpmu_power_state;     ///< LPMU电源状态
 } hardware_status_t;
 
 // ==================== 初始化接口 ====================
@@ -387,61 +387,61 @@ const char *usb_mux_get_target_name(usb_mux_target_t target);
 // ==================== 电源控制接口 ====================
 
 /**
- * @brief Orin设备开机
+ * @brief AGX设备开机
  * 
  * @return
  *     - ESP_OK: 操作成功
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t orin_power_on(void);
+esp_err_t agx_power_on(void);
 
 /**
- * @brief Orin设备关机
+ * @brief AGX设备关机
  * 
  * @return
  *     - ESP_OK: 操作成功
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t orin_power_off(void);
+esp_err_t agx_power_off(void);
 
 /**
- * @brief Orin设备重启
+ * @brief AGX设备重启
  * 
  * @return
  *     - ESP_OK: 操作成功
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t orin_reset(void);
+esp_err_t agx_reset(void);
 
 /**
- * @brief Orin设备进入恢复模式
+ * @brief AGX设备进入恢复模式
  * 
  * @return
  *     - ESP_OK: 操作成功
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t orin_enter_recovery_mode(void);
+esp_err_t agx_enter_recovery_mode(void);
 
 /**
- * @brief N305设备电源切换
+ * @brief LPMU设备电源切换
  * 
  * @return
  *     - ESP_OK: 操作成功
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t n305_power_toggle(void);
+esp_err_t lpmu_power_toggle(void);
 
 /**
- * @brief N305设备重启
+ * @brief LPMU设备重启
  * 
  * @return
  *     - ESP_OK: 操作成功
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t n305_reset(void);
+esp_err_t lpmu_reset(void);
 
 /**
- * @brief 获取Orin电源状态
+ * @brief 获取AGX电源状态
  * 
  * @param state 存储状态的指针
  * @return
@@ -449,10 +449,10 @@ esp_err_t n305_reset(void);
  *     - ESP_ERR_INVALID_ARG: 参数无效
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t orin_get_power_state(power_state_t *state);
+esp_err_t agx_get_power_state(power_state_t *state);
 
 /**
- * @brief 获取N305电源状态
+ * @brief 获取LPMU电源状态
  * 
  * @param state 存储状态的指针
  * @return
@@ -460,7 +460,7 @@ esp_err_t orin_get_power_state(power_state_t *state);
  *     - ESP_ERR_INVALID_ARG: 参数无效
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
-esp_err_t n305_get_power_state(power_state_t *state);
+esp_err_t lpmu_get_power_state(power_state_t *state);
 
 /**
  * @brief 获取电源状态名称
@@ -533,27 +533,27 @@ esp_err_t hardware_test_gpio_input(uint8_t pin);
 esp_err_t hardware_test_all(void);
 
 /**
- * @brief 测试Orin电源控制
+ * @brief 测试AGX电源控制
  * 
  * @return
  *     - ESP_OK: 测试通过
  *     - ESP_FAIL: 测试失败
  */
-esp_err_t hardware_test_orin_power(void);
+esp_err_t hardware_test_agx_power(void);
 
 /**
- * @brief 测试N305电源控制
+ * @brief 测试LPMU电源控制
  * 
  * @return
  *     - ESP_OK: 测试通过
  *     - ESP_FAIL: 测试失败
  */
-esp_err_t hardware_test_n305_power(void);
+esp_err_t hardware_test_lpmu_power(void);
 
 /**
- * @brief 测试Orin恢复模式GPIO引脚
+ * @brief 测试AGX恢复模式GPIO引脚
  * 
- * 专门测试GPIO40（ORIN_RECOVERY_PIN）的输出功能
+ * 专门测试GPIO40（AGX_RECOVERY_PIN）的输出功能
  * 包括拉高、保持、拉低等操作的验证
  * 
  * @return

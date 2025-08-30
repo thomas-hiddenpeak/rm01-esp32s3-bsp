@@ -19,6 +19,9 @@ idf_component_register(
         device_interface
         hardware_control 
         system_monitor
+        ethernet_interface
+        config_manager
     PRIV_REQUIRES
         driver
+        sdcard_interface
 )
