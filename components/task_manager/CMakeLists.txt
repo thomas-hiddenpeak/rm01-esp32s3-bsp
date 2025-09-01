@@ -1,0 +1,18 @@
+idf_component_register(
+    SRCS 
+        "task_manager.c"
+        "task_manager_console.c"
+    INCLUDE_DIRS 
+        "include"
+    REQUIRES 
+        "nvs_flash"
+        "console"
+        "freertos"
+        "esp_system"
+        "config_manager"
+        "device_interface"
+        "ethernet_interface"
+        "hardware_control"
+        "console_interface"
+        "system_monitor"
+)

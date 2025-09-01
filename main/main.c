@@ -36,17 +36,18 @@ void app_main(void)
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set("CONFIG_MANAGER", ESP_LOG_INFO);  // 启用配置管理器详细日志
     
-    printf("\n=== ESP32S3 组件化控制台程序启动 ===\n");
+    printf("\n=== ESP32S3 控制台程序启动 ===\n");
 
-    // 初始化NVS
+    // 1. 初始化NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+    ESP_LOGI(TAG, "NVS初始化完成");
 
-    // 初始化配置管理器
+    // 2. 初始化配置管理器
     ret = config_manager_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "配置管理器初始化失败: %s", esp_err_to_name(ret));
@@ -54,7 +55,7 @@ void app_main(void)
         ESP_LOGI(TAG, "配置管理器初始化成功");
     }
 
-    // 尝试加载保存的配置
+    // 3. 尝试加载保存的配置
     ret = config_manager_load();
     if (ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "未找到保存的配置，使用默认配置");
@@ -66,7 +67,7 @@ void app_main(void)
         ESP_LOGI(TAG, "配置加载成功");
     }
 
-    // 初始化设备接口（包含硬件控制和系统监控）
+    // 4. 初始化设备接口（包含硬件控制和系统监控）
     device_interface_config_t device_config = DEVICE_INTERFACE_DEFAULT_CONFIG();
     ret = device_interface_init(&device_config);
     if (ret != ESP_OK) {
@@ -75,10 +76,10 @@ void app_main(void)
         ESP_LOGI(TAG, "设备接口初始化成功");
     }
 
-    // 注册设备事件回调
+    // 5. 注册设备事件回调
     device_interface_register_event_callback(device_event_handler);
 
-    // 应用加载的配置到所有子系统
+    // 6. 应用加载的配置到所有子系统
     ret = config_manager_apply_config();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "配置应用失败: %s", esp_err_to_name(ret));
@@ -86,7 +87,7 @@ void app_main(void)
         ESP_LOGI(TAG, "配置已应用到所有子系统");
     }
 
-    // 初始化控制台接口
+    // 7. 初始化控制台接口
     console_interface_config_t console_config = CONSOLE_INTERFACE_DEFAULT_CONFIG();
     ret = console_interface_init(&console_config);
     if (ret != ESP_OK) {
@@ -95,10 +96,10 @@ void app_main(void)
         ESP_LOGI(TAG, "控制台接口初始化成功");
     }
 
-    // 注册控制台事件回调
+    // 8. 注册控制台事件回调
     console_interface_register_event_callback(console_event_handler);
 
-    // 初始化以太网接口
+    // 9. 初始化以太网接口
     ethernet_config_t ethernet_config = ETHERNET_DEFAULT_CONFIG();
     // 启用DHCP服务器和网关功能
     ethernet_config.dhcp_server_enabled = true;
@@ -110,10 +111,10 @@ void app_main(void)
         ESP_LOGI(TAG, "以太网接口初始化成功");
     }
 
-    // 注册以太网事件回调
+    // 10. 注册以太网事件回调
     ethernet_register_event_callback(ethernet_event_handler);
 
-    // 注册所有控制台命令
+    // 11. 注册所有控制台命令
     console_interface_register_system_commands();
     console_interface_register_device_commands();
     console_interface_register_config_commands();
@@ -128,10 +129,10 @@ void app_main(void)
         ESP_LOGI(TAG, "ping命令注册成功");
     }
 
-    // 短暂延迟让系统稳定
+    // 12. 短暂延迟让系统稳定
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-    // 启动以太网接口
+    // 13. 启动以太网接口
     ret = ethernet_interface_start();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "以太网接口启动失败: %s", esp_err_to_name(ret));
@@ -139,10 +140,10 @@ void app_main(void)
         ESP_LOGI(TAG, "以太网接口启动成功");
     }
 
-    // 显示系统信息
+    // 14. 显示系统信息
     device_print_full_status();
 
-    // 启动控制台任务
+    // 15. 启动控制台任务
     ret = console_interface_start(8192, 5);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "控制台任务启动失败: %s", esp_err_to_name(ret));

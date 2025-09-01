@@ -104,8 +104,9 @@ esp_err_t sdcard_mount(const char* mount_point)
     // 配置FAT文件系统挂载选项
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
+        .max_files = 10,                  // 增加同时打开文件数量
+        .allocation_unit_size = 16 * 1024,
+        .disk_status_check_enable = false  // 禁用磁盘状态检查以提高性能
     };
 
     // 配置SDMMC主机和插槽

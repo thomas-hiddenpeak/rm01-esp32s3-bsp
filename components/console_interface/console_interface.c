@@ -337,6 +337,50 @@ esp_err_t console_interface_register_ethernet_commands(void)
 
 // ==================== SD卡相关命令 ====================
 
+// SD卡 Shell 状态管理
+typedef struct {
+    bool in_shell_mode;
+    char current_path[256];  // 减小路径缓冲区大小
+    char previous_path[256];
+} sdcard_shell_state_t;
+
+static sdcard_shell_state_t s_sdcard_shell = {
+    .in_shell_mode = false,
+    .current_path = "/sdcard",
+    .previous_path = "/sdcard"
+};
+
+// SD卡 Shell 函数声明
+static int cmd_sdcard_shell(int argc, char **argv);
+static int cmd_shell_exit(int argc, char **argv);
+static int cmd_shell_pwd(int argc, char **argv);
+static int cmd_shell_cd(int argc, char **argv);
+static int cmd_shell_ls(int argc, char **argv);
+static int cmd_shell_cat(int argc, char **argv);
+static int cmd_shell_mkdir(int argc, char **argv);
+static int cmd_shell_rm(int argc, char **argv);
+static int cmd_shell_rmdir(int argc, char **argv);
+static int cmd_shell_cp(int argc, char **argv);
+static int cmd_shell_write(int argc, char **argv);
+static int cmd_shell_stat(int argc, char **argv);
+static void sdcard_shell_register_commands(void);
+static void sdcard_shell_unregister_commands(void);
+static void normalize_path(char* path);
+static bool is_valid_path(const char* path);
+static void show_shell_prompt(void);
+
+// 显示Shell提示符
+static void show_shell_prompt(void)
+{
+    if (s_sdcard_shell.in_shell_mode) {
+        printf("\n[Shell模式] 当前目录: %s\n", s_sdcard_shell.current_path);
+        printf("输入命令 (pwd, cd, ls, cat, mkdir, rm, rmdir, cp, write, stat, exit): ");
+        fflush(stdout);
+    }
+}
+
+// SD卡普通命令函数
+
 static int cmd_sdcard_mount(int argc, char **argv)
 {
     esp_err_t ret = sdcard_init();
@@ -556,13 +600,25 @@ static int cmd_sdcard_cat(int argc, char **argv)
 
     if (argc < 2) {
         printf("用法: sdcard_cat <文件路径>\n");
+        printf("提示: 如果不是绝对路径，会自动加上 /sdcard/ 前缀\n");
         return 1;
     }
 
-    const char* file_path = argv[1];
+    const char* input_path = argv[1];
+    char file_path[512];
+    
+    // 如果路径不是以 / 开头，自动加上 /sdcard/ 前缀
+    if (input_path[0] != '/') {
+        snprintf(file_path, sizeof(file_path), "/sdcard/%s", input_path);
+    } else {
+        strncpy(file_path, input_path, sizeof(file_path) - 1);
+        file_path[sizeof(file_path) - 1] = '\0';
+    }
+    
     FILE* file = fopen(file_path, "r");
     if (file == NULL) {
         printf("无法打开文件: %s\n", file_path);
+        printf("提示: 请确认文件名和路径正确，注意大小写\n");
         return 1;
     }
 
@@ -589,16 +645,27 @@ static int cmd_sdcard_write(int argc, char **argv)
 
     if (argc < 3) {
         printf("用法: sdcard_write <文件路径> <内容>\n");
-        printf("示例: sdcard_write /sdcard/test.txt \"Hello World\"\n");
+        printf("示例: sdcard_write test.txt \"Hello World\"\n");
+        printf("提示: 如果不是绝对路径，会自动加上 /sdcard/ 前缀\n");
         return 1;
     }
 
-    const char* file_path = argv[1];
+    const char* input_path = argv[1];
     const char* content = argv[2];
+    char file_path[512];
+    
+    // 如果路径不是以 / 开头，自动加上 /sdcard/ 前缀
+    if (input_path[0] != '/') {
+        snprintf(file_path, sizeof(file_path), "/sdcard/%s", input_path);
+    } else {
+        strncpy(file_path, input_path, sizeof(file_path) - 1);
+        file_path[sizeof(file_path) - 1] = '\0';
+    }
     
     FILE* file = fopen(file_path, "w");
     if (file == NULL) {
         printf("无法创建文件: %s\n", file_path);
+        printf("提示: 请检查目录是否存在，文件名是否有效\n");
         return 1;
     }
 
@@ -651,15 +718,26 @@ static int cmd_sdcard_rm(int argc, char **argv)
 
     if (argc < 2) {
         printf("用法: sdcard_rm <文件路径>\n");
+        printf("提示: 如果不是绝对路径，会自动加上 /sdcard/ 前缀\n");
         return 1;
     }
 
-    const char* file_path = argv[1];
+    const char* input_path = argv[1];
+    char file_path[512];
+    
+    // 如果路径不是以 / 开头，自动加上 /sdcard/ 前缀
+    if (input_path[0] != '/') {
+        snprintf(file_path, sizeof(file_path), "/sdcard/%s", input_path);
+    } else {
+        strncpy(file_path, input_path, sizeof(file_path) - 1);
+        file_path[sizeof(file_path) - 1] = '\0';
+    }
     
     // 检查文件是否存在
     struct stat st;
     if (stat(file_path, &st) != 0) {
         printf("文件不存在: %s\n", file_path);
+        printf("提示: 请确认文件名和路径正确，注意大小写\n");
         return 1;
     }
 
@@ -687,15 +765,26 @@ static int cmd_sdcard_mkdir(int argc, char **argv)
 
     if (argc < 2) {
         printf("用法: sdcard_mkdir <目录路径>\n");
+        printf("提示: 如果不是绝对路径，会自动加上 /sdcard/ 前缀\n");
         return 1;
     }
 
-    const char* dir_path = argv[1];
+    const char* input_path = argv[1];
+    char dir_path[512];
+    
+    // 如果路径不是以 / 开头，自动加上 /sdcard/ 前缀
+    if (input_path[0] != '/') {
+        snprintf(dir_path, sizeof(dir_path), "/sdcard/%s", input_path);
+    } else {
+        strncpy(dir_path, input_path, sizeof(dir_path) - 1);
+        dir_path[sizeof(dir_path) - 1] = '\0';
+    }
     
     if (mkdir(dir_path, 0755) == 0) {
         printf("目录已创建: %s\n", dir_path);
     } else {
         printf("创建目录失败: %s\n", dir_path);
+        printf("提示: 请检查父目录是否存在，路径是否有效\n");
         return 1;
     }
     
@@ -711,15 +800,26 @@ static int cmd_sdcard_rmdir(int argc, char **argv)
 
     if (argc < 2) {
         printf("用法: sdcard_rmdir <目录路径>\n");
+        printf("提示: 如果不是绝对路径，会自动加上 /sdcard/ 前缀\n");
         return 1;
     }
 
-    const char* dir_path = argv[1];
+    const char* input_path = argv[1];
+    char dir_path[512];
+    
+    // 如果路径不是以 / 开头，自动加上 /sdcard/ 前缀
+    if (input_path[0] != '/') {
+        snprintf(dir_path, sizeof(dir_path), "/sdcard/%s", input_path);
+    } else {
+        strncpy(dir_path, input_path, sizeof(dir_path) - 1);
+        dir_path[sizeof(dir_path) - 1] = '\0';
+    }
     
     // 检查是否为目录
     struct stat st;
     if (stat(dir_path, &st) != 0) {
         printf("目录不存在: %s\n", dir_path);
+        printf("提示: 请确认目录名和路径正确，注意大小写\n");
         return 1;
     }
 
@@ -732,6 +832,7 @@ static int cmd_sdcard_rmdir(int argc, char **argv)
         printf("目录已删除: %s\n", dir_path);
     } else {
         printf("删除目录失败: %s (目录可能不为空)\n", dir_path);
+        printf("提示: 只能删除空目录，请先删除目录中的所有文件\n");
         return 1;
     }
     
@@ -815,6 +916,576 @@ static int cmd_sdcard_stat(int argc, char **argv)
     printf("权限: %lo\n", (unsigned long)(st.st_mode & 0777));
     
     return 0;
+}
+
+// ==================== SD卡 Shell 模式实现 ====================
+
+static void normalize_path(char* path) {
+    // 简单的路径规范化：移除末尾的 '/' (除了根目录)
+    size_t len = strlen(path);
+    if (len > 1 && path[len - 1] == '/') {
+        path[len - 1] = '\0';
+    }
+}
+
+static bool is_valid_path(const char* path) {
+    struct stat st;
+    return (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+}
+
+static bool check_shell_mode(void) {
+    if (!s_sdcard_shell.in_shell_mode) {
+        printf("请先执行 'sdcard_shell' 进入Shell模式\n");
+        return false;
+    }
+    return true;
+}
+
+static int safe_path_join(char* dest, size_t dest_size, const char* base, const char* name) {
+    if (strcmp(base, "/sdcard") == 0) {
+        return snprintf(dest, dest_size, "/sdcard/%s", name);
+    } else {
+        return snprintf(dest, dest_size, "%s/%s", base, name);
+    }
+}
+
+// 简化的路径构建宏
+#define BUILD_PATH(dest, input) do { \
+    if ((input)[0] != '/') { \
+        if (safe_path_join(dest, sizeof(dest), s_sdcard_shell.current_path, input) >= (int)sizeof(dest)) { \
+            printf("路径过长\n"); \
+            return 1; \
+        } \
+    } else { \
+        if (strlen(input) >= sizeof(dest)) { \
+            printf("路径过长\n"); \
+            return 1; \
+        } \
+        strcpy(dest, input); \
+    } \
+} while(0)
+
+static int cmd_sdcard_shell(int argc, char **argv)
+{
+    if (sdcard_get_status() != SDCARD_STATUS_MOUNTED) {
+        printf("SD卡未挂载，请先执行 'sdcard_mount'\n");
+        return 1;
+    }
+
+    if (s_sdcard_shell.in_shell_mode) {
+        printf("已经在SD卡Shell模式中\n");
+        return 0;
+    }
+
+    // 进入Shell模式
+    s_sdcard_shell.in_shell_mode = true;
+    strcpy(s_sdcard_shell.current_path, "/sdcard");
+    strcpy(s_sdcard_shell.previous_path, "/sdcard");
+    
+    // 注册Shell命令
+    sdcard_shell_register_commands();
+    
+    printf("进入SD卡Shell模式\n");
+    printf("========================================\n");
+    printf("欢迎使用 SD Card Shell 操作环境！\n");
+    printf("类似 Linux 的文件操作体验\n");
+    printf("当前目录: %s\n", s_sdcard_shell.current_path);
+    printf("========================================\n");
+    printf("可用命令:\n");
+    printf("  pwd        - 显示当前目录\n");
+    printf("  cd <dir>   - 切换目录 (支持 .., -, /)\n");
+    printf("  ls [dir]   - 列出目录内容 (显示文件大小)\n");
+    printf("  cat <file> - 查看文件内容\n");
+    printf("  mkdir <dir>- 创建目录\n");
+    printf("  rm <file>  - 删除文件\n");
+    printf("  rmdir <dir>- 删除目录\n");
+    printf("  cp <src> <dst> - 复制文件\n");
+    printf("  write <file> <content> - 写入文件\n");
+    printf("  stat <path> - 查看文件详细信息\n");
+    printf("  exit       - 退出Shell模式\n");
+    printf("========================================\n");
+    show_shell_prompt();
+    
+    return 0;
+}
+
+static int cmd_shell_exit(int argc, char **argv)
+{
+    if (!s_sdcard_shell.in_shell_mode) {
+        printf("当前不在SD卡Shell模式中\n");
+        return 1;
+    }
+
+    // 退出Shell模式
+    s_sdcard_shell.in_shell_mode = false;
+    
+    // 注销Shell命令
+    sdcard_shell_unregister_commands();
+    
+    printf("退出SD卡Shell模式\n");
+    
+    // 注意：ESP-IDF控制台不支持动态修改提示符
+    // 提示符将保持原状
+    
+    return 0;
+}
+
+static int cmd_shell_pwd(int argc, char **argv)
+{
+    if (!s_sdcard_shell.in_shell_mode) {
+        printf("请先执行 'sdcard_shell' 进入Shell模式\n");
+        return 1;
+    }
+    printf("%s\n", s_sdcard_shell.current_path);
+    show_shell_prompt();
+    return 0;
+}
+
+static int cmd_shell_cd(int argc, char **argv)
+{
+    if (!s_sdcard_shell.in_shell_mode) {
+        printf("请先执行 'sdcard_shell' 进入Shell模式\n");
+        return 1;
+    }
+
+    if (argc < 2) {
+        printf("用法: cd <目录>\n");
+        printf("特殊用法: cd .. (上级目录), cd - (上次目录), cd / (根目录)\n");
+        return 1;
+    }
+
+    const char* target = argv[1];
+    char new_path[256];
+    
+    if (strcmp(target, "..") == 0) {
+        // 上级目录
+        strcpy(new_path, s_sdcard_shell.current_path);
+        char* last_slash = strrchr(new_path, '/');
+        if (last_slash != NULL && last_slash != new_path) {
+            *last_slash = '\0';
+        } else {
+            strcpy(new_path, "/sdcard");
+        }
+    } else if (strcmp(target, "-") == 0) {
+        // 上次目录
+        strcpy(new_path, s_sdcard_shell.previous_path);
+    } else if (strcmp(target, "/") == 0) {
+        // 根目录
+        strcpy(new_path, "/sdcard");
+    } else if (target[0] == '/') {
+        // 绝对路径 - 限制长度
+        if (strlen(target) >= sizeof(new_path)) {
+            printf("路径过长\n");
+            return 1;
+        }
+        strcpy(new_path, target);
+    } else {
+        // 相对路径 - 使用安全函数
+        if (safe_path_join(new_path, sizeof(new_path), s_sdcard_shell.current_path, target) >= (int)sizeof(new_path)) {
+            printf("路径过长\n");
+            return 1;
+        }
+    }
+    
+    normalize_path(new_path);
+    
+    // 检查目录是否存在
+    if (!is_valid_path(new_path)) {
+        printf("目录不存在: %s\n", new_path);
+        return 1;
+    }
+    
+    // 更新路径
+    strcpy(s_sdcard_shell.previous_path, s_sdcard_shell.current_path);
+    strcpy(s_sdcard_shell.current_path, new_path);
+    
+    printf("当前目录: %s\n", s_sdcard_shell.current_path);
+    show_shell_prompt();
+    
+    return 0;
+}
+
+static int cmd_shell_ls(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+    
+    const char* path = (argc > 1) ? argv[1] : s_sdcard_shell.current_path;
+    char full_path[256];
+    
+    // 简化路径处理
+    if (path[0] != '/') {
+        if (safe_path_join(full_path, sizeof(full_path), s_sdcard_shell.current_path, path) >= (int)sizeof(full_path)) {
+            printf("路径过长\n");
+            return 1;
+        }
+        path = full_path;
+    }
+
+    DIR* dir = opendir(path);
+    if (dir == NULL) {
+        printf("无法打开目录: %s\n", path);
+        return 1;
+    }
+
+    struct dirent* entry;
+    int file_count = 0, dir_count = 0;
+    printf("%-20s %10s %s\n", "名称", "大小", "类型");
+    printf("----------------------------------------\n");
+    
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        // 获取文件完整路径以获取文件大小
+        char item_path[256];
+        if (safe_path_join(item_path, sizeof(item_path), path, entry->d_name) < (int)sizeof(item_path)) {
+            struct stat st;
+            char size_str[16];
+            
+            if (stat(item_path, &st) == 0) {
+                if (entry->d_type == DT_DIR) {
+                    strcpy(size_str, "<DIR>");
+                } else {
+                    // 格式化文件大小
+                    if (st.st_size < 1024) {
+                        snprintf(size_str, sizeof(size_str), "%ldB", st.st_size);
+                    } else if (st.st_size < 1024 * 1024) {
+                        snprintf(size_str, sizeof(size_str), "%.1fK", (double)st.st_size / 1024);
+                    } else {
+                        snprintf(size_str, sizeof(size_str), "%.1fM", (double)st.st_size / (1024 * 1024));
+                    }
+                }
+            } else {
+                strcpy(size_str, "---");
+            }
+            
+            printf("%-20s %10s %s\n", entry->d_name, size_str, 
+                   (entry->d_type == DT_DIR) ? "目录" : "文件");
+        } else {
+            // 路径过长，使用简化显示
+            printf("%-20s %10s %s\n", entry->d_name, 
+                   (entry->d_type == DT_DIR) ? "<DIR>" : "---", 
+                   (entry->d_type == DT_DIR) ? "目录" : "文件");
+        }
+        
+        if (entry->d_type == DT_DIR) {
+            dir_count++;
+        } else {
+            file_count++;
+        }
+    }
+    
+    closedir(dir);
+    printf("----------------------------------------\n");
+    printf("总计: %d 个文件, %d 个目录\n", file_count, dir_count);
+    show_shell_prompt();
+
+    return 0;
+}
+
+static int cmd_shell_cat(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+
+    if (argc < 2) {
+        printf("用法: cat <文件名>\n");
+        return 1;
+    }
+
+    const char* filename = argv[1];
+    char file_path[256];
+    
+    BUILD_PATH(file_path, filename);
+    
+    FILE* file = fopen(file_path, "r");
+    if (file == NULL) {
+        printf("无法打开文件: %s\n", file_path);
+        return 1;
+    }
+
+    printf("文件内容: %s\n", file_path);
+    printf("----------------------------------------\n");
+    
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), file) != NULL) {
+        printf("%s", buffer);
+    }
+    
+    fclose(file);
+    printf("\n----------------------------------------\n");
+    
+    return 0;
+}
+
+static int cmd_shell_mkdir(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+
+    if (argc < 2) {
+        printf("用法: mkdir <目录名>\n");
+        return 1;
+    }
+
+    const char* dirname = argv[1];
+    char dir_path[256];
+    BUILD_PATH(dir_path, dirname);
+    
+    if (mkdir(dir_path, 0755) == 0) {
+        printf("目录已创建: %s\n", dir_path);
+    } else {
+        printf("创建目录失败: %s\n", dir_path);
+        return 1;
+    }
+    
+    show_shell_prompt();
+    return 0;
+}
+
+static int cmd_shell_rm(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+
+    if (argc < 2) {
+        printf("用法: rm <文件名>\n");
+        return 1;
+    }
+
+    const char* filename = argv[1];
+    char file_path[256];
+    BUILD_PATH(file_path, filename);
+    
+    if (unlink(file_path) == 0) {
+        printf("文件已删除: %s\n", file_path);
+        show_shell_prompt();
+    } else {
+        printf("删除文件失败: %s\n", file_path);
+        show_shell_prompt();
+        return 1;
+    }
+    
+    return 0;
+}
+
+static int cmd_shell_rmdir(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+
+    if (argc < 2) {
+        printf("用法: rmdir <目录名>\n");
+        return 1;
+    }
+
+    const char* dirname = argv[1];
+    char dir_path[256];
+    BUILD_PATH(dir_path, dirname);
+    
+    if (rmdir(dir_path) == 0) {
+        printf("目录已删除: %s\n", dir_path);
+        show_shell_prompt();
+    } else {
+        printf("删除目录失败: %s (目录可能不为空)\n", dir_path);
+        show_shell_prompt();
+        return 1;
+    }
+    
+    return 0;
+}
+
+static int cmd_shell_write(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+
+    if (argc < 3) {
+        printf("用法: write <文件名> <内容>\n");
+        return 1;
+    }
+
+    const char* filename = argv[1];
+    const char* content = argv[2];
+    char file_path[256];
+    BUILD_PATH(file_path, filename);
+    
+    FILE* file = fopen(file_path, "w");
+    if (file == NULL) {
+        printf("无法创建文件: %s\n", file_path);
+        show_shell_prompt();
+        return 1;
+    }
+
+    fprintf(file, "%s\n", content);
+    fclose(file);
+    
+    printf("内容已写入文件: %s\n", file_path);
+    show_shell_prompt();
+    return 0;
+}
+
+// 简化cp和stat命令
+static int cmd_shell_cp(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+    
+    if (argc < 3) {
+        printf("用法: cp <源文件> <目标文件>\n");
+        return 1;
+    }
+
+    const char* src_name = argv[1];
+    const char* dst_name = argv[2];
+    char src_path[256], dst_path[256];
+    
+    BUILD_PATH(src_path, src_name);
+    BUILD_PATH(dst_path, dst_name);
+    
+    // 检查源文件是否存在
+    struct stat src_stat;
+    if (stat(src_path, &src_stat) != 0) {
+        printf("源文件不存在: %s\n", src_path);
+        return 1;
+    }
+    
+    if (S_ISDIR(src_stat.st_mode)) {
+        printf("错误: %s 是目录，暂不支持目录复制\n", src_path);
+        return 1;
+    }
+    
+    FILE* src = fopen(src_path, "rb");
+    if (src == NULL) {
+        printf("无法打开源文件: %s\n", src_path);
+        return 1;
+    }
+
+    FILE* dst = fopen(dst_path, "wb");
+    if (dst == NULL) {
+        printf("无法创建目标文件: %s\n", dst_path);
+        fclose(src);
+        return 1;
+    }
+
+    char buffer[1024];
+    size_t bytes_read;
+    size_t total_bytes = 0;
+    
+    printf("正在复制 %s -> %s ...\n", src_path, dst_path);
+    
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        if (fwrite(buffer, 1, bytes_read, dst) != bytes_read) {
+            printf("写入文件失败\n");
+            fclose(src);
+            fclose(dst);
+            return 1;
+        }
+        total_bytes += bytes_read;
+        
+        // 显示进度（每64KB显示一次）
+        if (total_bytes % (64 * 1024) == 0 || bytes_read < sizeof(buffer)) {
+            if (src_stat.st_size > 0) {
+                int progress = (int)((total_bytes * 100) / src_stat.st_size);
+                printf("\r进度: %d%% (%zu/%ld 字节)", progress, total_bytes, src_stat.st_size);
+                fflush(stdout);
+            }
+        }
+    }
+    
+    fclose(src);
+    fclose(dst);
+    
+    printf("\n文件复制成功: %s -> %s (%zu 字节)\n", src_path, dst_path, total_bytes);
+    show_shell_prompt();
+    return 0;
+}
+
+static int cmd_shell_stat(int argc, char **argv)
+{
+    if (!check_shell_mode()) return 1;
+    
+    if (argc < 2) {
+        printf("用法: stat <文件或目录名>\n");
+        return 1;
+    }
+
+    const char* name = argv[1];
+    char item_path[256];
+    BUILD_PATH(item_path, name);
+    
+    struct stat st;
+    if (stat(item_path, &st) != 0) {
+        printf("无法获取信息: %s\n", item_path);
+        return 1;
+    }
+
+    printf("文件信息: %s\n", item_path);
+    printf("========================================\n");
+    printf("类型: %s\n", S_ISDIR(st.st_mode) ? "目录" : "普通文件");
+    
+    if (S_ISDIR(st.st_mode)) {
+        printf("大小: <目录>\n");
+    } else {
+        printf("大小: %ld 字节", st.st_size);
+        if (st.st_size >= 1024) {
+            if (st.st_size < 1024 * 1024) {
+                printf(" (%.2f KB)", (double)st.st_size / 1024);
+            } else {
+                printf(" (%.2f MB)", (double)st.st_size / (1024 * 1024));
+            }
+        }
+        printf("\n");
+    }
+    
+    printf("修改时间: %s", ctime(&st.st_mtime));
+    printf("访问权限: %o\n", (unsigned)(st.st_mode & 0777));
+    
+    // 显示权限的可读形式
+    printf("权限详情: ");
+    printf("%c", S_ISDIR(st.st_mode) ? 'd' : '-');
+    printf("%c%c%c", 
+           (st.st_mode & S_IRUSR) ? 'r' : '-',
+           (st.st_mode & S_IWUSR) ? 'w' : '-',
+           (st.st_mode & S_IXUSR) ? 'x' : '-');
+    printf("%c%c%c", 
+           (st.st_mode & S_IRGRP) ? 'r' : '-',
+           (st.st_mode & S_IWGRP) ? 'w' : '-',
+           (st.st_mode & S_IXGRP) ? 'x' : '-');
+    printf("%c%c%c\n", 
+           (st.st_mode & S_IROTH) ? 'r' : '-',
+           (st.st_mode & S_IWOTH) ? 'w' : '-',
+           (st.st_mode & S_IXOTH) ? 'x' : '-');
+    
+    printf("========================================\n");
+    show_shell_prompt();
+    
+    return 0;
+}
+
+static void sdcard_shell_register_commands(void)
+{
+    // Shell模式命令
+    const esp_console_cmd_t shell_commands[] = {
+        {.command = "exit", .help = "退出SD卡Shell模式", .func = &cmd_shell_exit},
+        {.command = "pwd", .help = "显示当前目录", .func = &cmd_shell_pwd},
+        {.command = "cd", .help = "切换目录", .hint = "<目录>", .func = &cmd_shell_cd},
+        {.command = "ls", .help = "列出目录内容", .hint = "[目录]", .func = &cmd_shell_ls},
+        {.command = "cat", .help = "查看文件内容", .hint = "<文件>", .func = &cmd_shell_cat},
+        {.command = "mkdir", .help = "创建目录", .hint = "<目录>", .func = &cmd_shell_mkdir},
+        {.command = "rm", .help = "删除文件", .hint = "<文件>", .func = &cmd_shell_rm},
+        {.command = "rmdir", .help = "删除目录", .hint = "<目录>", .func = &cmd_shell_rmdir},
+        {.command = "cp", .help = "复制文件", .hint = "<源> <目标>", .func = &cmd_shell_cp},
+        {.command = "write", .help = "写入文件", .hint = "<文件> <内容>", .func = &cmd_shell_write},
+        {.command = "stat", .help = "查看文件详情", .hint = "<文件>", .func = &cmd_shell_stat},
+    };
+
+    for (int i = 0; i < sizeof(shell_commands) / sizeof(shell_commands[0]); i++) {
+        esp_console_cmd_register(&shell_commands[i]);
+    }
+}
+
+static void sdcard_shell_unregister_commands(void)
+{
+    // 注意：ESP-IDF console组件不支持动态命令注销
+    // Shell命令将保持注册状态，但通过 in_shell_mode 标志控制行为
+    // 这是一个设计权衡，避免了复杂的命令管理
+    ESP_LOGI(TAG, "SD card shell commands remain registered (ESP-IDF limitation)");
 }
 
 esp_err_t console_interface_register_sdcard_commands(void)
@@ -914,6 +1585,13 @@ esp_err_t console_interface_register_sdcard_commands(void)
             .help = "显示文件/目录详细信息",
             .hint = "<path>",
             .func = &cmd_sdcard_stat,
+            .argtable = NULL
+        },
+        {
+            .command = "sdcard_shell",
+            .help = "进入SD卡Shell操作模式 (类似Linux环境)",
+            .hint = NULL,
+            .func = &cmd_sdcard_shell,
             .argtable = NULL
         }
     };
@@ -1093,6 +1771,8 @@ static int cmd_help(int argc, char **argv)
     printf("  sdcard_rmdir <dir>   - 删除空目录\n");
     printf("  📊 信息查询:\n");
     printf("  sdcard_stat <path>   - 显示文件/目录详细信息\n");
+    printf("  🖥️  Shell模式:\n");
+    printf("  sdcard_shell         - 进入类Linux操作环境 (cd/pwd/ls/等)\n");
     printf("\n🔧 配置命令 (自动保存):\n");
     printf("  config set eth <ip> <gw> <mask> <dns>    - 设置以太网配置\n");
     printf("  config set dhcp <enable> <start> <end> <lease> - 设置DHCP参数\n");
