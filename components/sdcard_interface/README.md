@@ -17,12 +17,14 @@ SD 卡通过 SDMMC 接口连接到 ESP32S3，使用以下引脚：
 
 ## 功能特性
 
-- **初始化和挂载**: 自动检测和初始化 SD 卡
-- **文件系统支持**: 使用 FAT32 文件系统
-- **空间管理**: 查看总容量、已用空间和可用空间
-- **卡信息查询**: 获取 SD 卡详细信息（容量、类型、速度等）
-- **安全操作**: 支持安全挂载和卸载
-- **格式化功能**: 支持 SD 卡格式化（谨慎使用）
+- ✅ **自动挂载**：系统启动时自动检测并挂载SD卡
+- ✅ **4位SDMMC接口**：高速数据传输，最高支持40MHz时钟
+- ✅ **FAT32文件系统**：兼容性好，支持大文件
+- ✅ **热插拔支持**：运行时可安全插拔SD卡
+- ✅ **完整的控制台命令**：方便调试和管理
+- ✅ **文件操作接口**：标准C文件API
+- ✅ **容量检测**：自动识别SD/SDHC/SDXC卡类型
+- ✅ **空间管理**：实时监控存储空间使用情况
 
 ## API 接口
 
@@ -56,6 +58,9 @@ esp_err_t sdcard_get_space(uint64_t* free_bytes, uint64_t* total_bytes);
 
 // 检查SD卡是否存在
 bool sdcard_is_present(void);
+
+// 自动检测并挂载SD卡（系统启动时调用）
+esp_err_t sdcard_auto_mount(const char* mount_point);
 ```
 
 ### 危险操作
@@ -160,7 +165,16 @@ SD卡格式化成功
 
 void example_sdcard_usage(void)
 {
-    // 初始化并挂载SD卡
+    // 方式1：自动挂载（推荐在系统启动时使用）
+    esp_err_t ret = sdcard_auto_mount(NULL);  // 使用默认挂载点 /sdcard
+    if (ret == ESP_OK) {
+        printf("SD卡自动挂载成功\n");
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        printf("未检测到SD卡\n");
+        return;
+    }
+    
+    // 方式2：手动初始化并挂载
     if (sdcard_init() == ESP_OK) {
         if (sdcard_mount("/sdcard") == ESP_OK) {
             printf("SD卡挂载成功\n");

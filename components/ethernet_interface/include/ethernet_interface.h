@@ -200,6 +200,17 @@ ethernet_status_t ethernet_get_status(void);
 esp_err_t ethernet_get_config(ethernet_config_t *config);
 
 /**
+ * @brief Save ethernet configuration from config manager
+ * 
+ * This function allows the config manager to update the ethernet configuration
+ * stored in the ethernet interface's NVS storage.
+ * 
+ * @param config Pointer to ethernet configuration to save
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t ethernet_save_config_from_manager(const ethernet_config_t *config);
+
+/**
  * @brief Get ethernet statistics
  * 
  * @param stats Pointer to store statistics

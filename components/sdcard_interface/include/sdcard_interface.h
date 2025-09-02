@@ -101,6 +101,15 @@ esp_err_t sdcard_get_space(sdcard_space_t* space);
 bool sdcard_is_present(void);
 
 /**
+ * @brief 自动检测并挂载SD卡
+ * 如果检测到SD卡存在，会自动挂载到默认挂载点
+ * 
+ * @param mount_point 挂载点路径，如果为NULL则使用默认的"/sdcard"
+ * @return esp_err_t ESP_OK成功挂载，ESP_ERR_NOT_FOUND未检测到SD卡，其他为错误码
+ */
+esp_err_t sdcard_auto_mount(const char* mount_point);
+
+/**
  * @brief 格式化SD卡 (小心使用！)
  * 
  * @return esp_err_t ESP_OK成功，其他为错误码

@@ -3,7 +3,7 @@
  * @brief ESP32S3 Configuration Manager Component
  * 
  * This component provides comprehensive configuration management for the ESP32S3 BSP,
- * including saving/loading default parameters for fan, LED, ethernet, DHCP, and gateway settings.
+ * including saving/loading configurations for fan, LED, ethernet, DHCP, and gateway settings.
  */
 
 #ifndef CONFIG_MANAGER_H
@@ -18,6 +18,17 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Web server configuration structure (simplified for config manager)
+ */
+typedef struct {
+    char document_root[256];        ///< Document root path on SD card
+    uint16_t port;                  ///< HTTP server port
+    bool auto_start;                ///< Auto start server on boot
+    bool enable_cors;               ///< Enable CORS headers
+    char default_index[64];         ///< Default index file
+} web_server_config_t;
 
 /**
  * @brief Fan configuration structure
@@ -63,6 +74,14 @@ typedef struct {
 } gateway_config_t;
 
 /**
+ * @brief USB MUX configuration structure
+ */
+typedef struct {
+    uint8_t default_target;     ///< Default USB MUX target (0=ESP32S3, 1=AGX, 2=LPMU)
+    bool auto_restore;          ///< Auto restore USB MUX target on boot
+} usb_mux_config_t;
+
+/**
  * @brief System configuration structure
  */
 typedef struct {
@@ -81,6 +100,8 @@ typedef struct {
     ethernet_config_t ethernet; ///< Ethernet configuration
     dhcp_config_t dhcp;         ///< DHCP server configuration
     gateway_config_t gateway;   ///< Gateway service configuration
+    usb_mux_config_t usb_mux;   ///< USB MUX configuration
+    web_server_config_t web;    ///< Web server configuration
     system_config_t system;     ///< System configuration
     uint32_t config_version;    ///< Configuration version for compatibility
     uint32_t checksum;          ///< Configuration checksum for validation
@@ -151,6 +172,14 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
 }
 
 /**
+ * @brief Default USB MUX configuration
+ */
+#define DEFAULT_USB_MUX_CONFIG() { \
+    .default_target = 0, \
+    .auto_restore = true \
+}
+
+/**
  * @brief Default system configuration
  */
 #define DEFAULT_SYSTEM_CONFIG() { \
@@ -158,6 +187,17 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
     .save_interval_ms = 300000, \
     .startup_load_config = true, \
     .enable_debug_logging = false \
+}
+
+/**
+ * @brief Default web server configuration
+ */
+#define DEFAULT_WEB_SERVER_CONFIG() { \
+    .document_root = "/sdcard/web", \
+    .port = 80, \
+    .auto_start = false, \
+    .enable_cors = true, \
+    .default_index = "index.html" \
 }
 
 /**
@@ -169,6 +209,8 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
     .ethernet = DEFAULT_ETHERNET_CONFIG(), \
     .dhcp = DEFAULT_DHCP_CONFIG(), \
     .gateway = DEFAULT_GATEWAY_CONFIG(), \
+    .usb_mux = DEFAULT_USB_MUX_CONFIG(), \
+    .web = DEFAULT_WEB_SERVER_CONFIG(), \
     .system = DEFAULT_SYSTEM_CONFIG(), \
     .config_version = 1, \
     .checksum = 0 \
@@ -276,6 +318,13 @@ const gateway_config_t* config_manager_get_gateway_config(void);
  */
 const system_config_t* config_manager_get_system_config(void);
 
+/**
+ * @brief Get web server configuration
+ * 
+ * @return const web_server_config_t* Pointer to web server configuration
+ */
+const web_server_config_t* config_manager_get_web_server_config(void);
+
 // ==================== Configuration Setters ====================
 
 /**
@@ -326,6 +375,14 @@ esp_err_t config_manager_set_gateway_config(const gateway_config_t *config);
  */
 esp_err_t config_manager_set_system_config(const system_config_t *config);
 
+/**
+ * @brief Set web server configuration
+ * 
+ * @param config Web server configuration structure
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_web_server_config(const web_server_config_t *config);
+
 // ==================== Individual Parameter Functions ====================
 
 /**
@@ -348,6 +405,21 @@ esp_err_t config_manager_set_fan_speed(uint8_t speed_on, uint8_t speed_off);
 esp_err_t config_manager_set_led_defaults(uint8_t brightness, 
                                           led_color_t board_color,
                                           led_color_t touch_color);
+
+/**
+ * @brief Set USB MUX default target
+ * 
+ * @param target USB MUX target (0=ESP32S3, 1=AGX, 2=LPMU)
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_usb_mux_target(uint8_t target);
+
+/**
+ * @brief Get USB MUX configuration
+ * 
+ * @return const usb_mux_config_t* Pointer to USB MUX configuration
+ */
+const usb_mux_config_t* config_manager_get_usb_mux_config(void);
 
 /**
  * @brief Set ethernet IP configuration using string format
@@ -382,6 +454,16 @@ esp_err_t config_manager_set_dhcp_params(bool enable, const char *start_ip,
  * @return esp_err_t ESP_OK on success, error code otherwise
  */
 esp_err_t config_manager_set_gateway_params(bool enable, bool nat_enable, bool firewall_enable);
+
+/**
+ * @brief Set web server parameters
+ * 
+ * @param document_root Document root path
+ * @param port HTTP server port  
+ * @param auto_start Auto start flag
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_web_server_params(const char *document_root, uint16_t port, bool auto_start);
 
 // ==================== Utility Functions ====================
 

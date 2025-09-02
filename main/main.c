@@ -20,6 +20,7 @@
 #include "hardware_config.h"
 #include "console_ping.h"
 #include "sdcard_interface.h"
+#include "web_server.h"
 
 static const char *TAG = "ESP32S3_MAIN";
 
@@ -60,11 +61,34 @@ void app_main(void)
     if (ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "未找到保存的配置，使用默认配置");
         config_manager_reset_to_defaults();
+        // 保存默认配置到NVS
+        esp_err_t save_ret = config_manager_save();
+        if (save_ret == ESP_OK) {
+            ESP_LOGI(TAG, "默认配置已保存到NVS");
+        } else {
+            ESP_LOGW(TAG, "保存默认配置失败: %s", esp_err_to_name(save_ret));
+        }
     } else if (ret != ESP_OK) {
         ESP_LOGW(TAG, "配置加载失败，使用默认配置: %s", esp_err_to_name(ret));
         config_manager_reset_to_defaults();
+        // 保存默认配置到NVS
+        esp_err_t save_ret = config_manager_save();
+        if (save_ret == ESP_OK) {
+            ESP_LOGI(TAG, "默认配置已保存到NVS");
+        } else {
+            ESP_LOGW(TAG, "保存默认配置失败: %s", esp_err_to_name(save_ret));
+        }
     } else {
         ESP_LOGI(TAG, "配置加载成功");
+        
+        // 检查是否启用了启动时加载配置
+        const complete_config_t *loaded_config = config_manager_get_config();
+        if (loaded_config && !loaded_config->system.startup_load_config) {
+            ESP_LOGW(TAG, "系统配置禁用了启动时加载配置，重置为默认配置");
+            config_manager_reset_to_defaults();
+        } else {
+            ESP_LOGI(TAG, "✅ 启动时配置加载已启用，将使用保存的配置");
+        }
     }
 
     // 4. 初始化设备接口（包含硬件控制和系统监控）
@@ -100,10 +124,22 @@ void app_main(void)
     console_interface_register_event_callback(console_event_handler);
 
     // 9. 初始化以太网接口
-    ethernet_config_t ethernet_config = ETHERNET_DEFAULT_CONFIG();
-    // 启用DHCP服务器和网关功能
-    ethernet_config.dhcp_server_enabled = true;
-    ethernet_config.gateway_enabled = true;
+    // 使用配置管理器中的以太网配置，而不是默认配置
+    const ethernet_config_t *saved_eth_config = config_manager_get_ethernet_config();
+    ethernet_config_t ethernet_config;
+    if (saved_eth_config) {
+        // 使用已保存的配置
+        memcpy(&ethernet_config, saved_eth_config, sizeof(ethernet_config_t));
+        ESP_LOGI(TAG, "使用配置管理器中的以太网配置");
+    } else {
+        // 回退到默认配置
+        ethernet_config_t default_config = ETHERNET_DEFAULT_CONFIG();
+        memcpy(&ethernet_config, &default_config, sizeof(ethernet_config_t));
+        // 启用DHCP服务器和网关功能
+        ethernet_config.dhcp_server_enabled = true;
+        ethernet_config.gateway_enabled = true;
+        ESP_LOGW(TAG, "配置管理器未初始化，使用默认以太网配置");
+    }
     ret = ethernet_interface_init(&ethernet_config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "以太网接口初始化失败: %s", esp_err_to_name(ret));
@@ -114,12 +150,24 @@ void app_main(void)
     // 10. 注册以太网事件回调
     ethernet_register_event_callback(ethernet_event_handler);
 
-    // 11. 注册所有控制台命令
+    // 11. 自动检测并挂载SD卡
+    ESP_LOGI(TAG, "尝试自动挂载SD卡...");
+    ret = sdcard_auto_mount(NULL);  // 使用默认挂载点 /sdcard
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "SD卡自动挂载成功");
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        ESP_LOGD(TAG, "未检测到SD卡，跳过挂载");
+    } else {
+        ESP_LOGW(TAG, "SD卡自动挂载失败: %s", esp_err_to_name(ret));
+    }
+
+    // 12. 注册所有控制台命令
     console_interface_register_system_commands();
     console_interface_register_device_commands();
     console_interface_register_config_commands();
     console_interface_register_ethernet_commands();
     console_interface_register_sdcard_commands();
+    console_interface_register_web_server_commands();
     
     // 注册官方ping命令 - 重新启用，现在网络硬件确认工作正常
     ret = console_cmd_ping_register();
@@ -129,10 +177,10 @@ void app_main(void)
         ESP_LOGI(TAG, "ping命令注册成功");
     }
 
-    // 12. 短暂延迟让系统稳定
+    // 13. 短暂延迟让系统稳定
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-    // 13. 启动以太网接口
+    // 14. 启动以太网接口
     ret = ethernet_interface_start();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "以太网接口启动失败: %s", esp_err_to_name(ret));
@@ -140,10 +188,28 @@ void app_main(void)
         ESP_LOGI(TAG, "以太网接口启动成功");
     }
 
-    // 14. 显示系统信息
+    // 15. 初始化Web服务器
+    ESP_LOGI(TAG, "检查Web服务器自动启动配置...");
+    
+    // 从配置管理器检查是否自动启动
+    const web_server_config_t *web_config = config_manager_get_web_server_config();
+    if (web_config && web_config->auto_start) {
+        ESP_LOGI(TAG, "配置为自动启动Web服务器");
+        ret = web_server_start();
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Web服务器自动启动成功");
+            ESP_LOGI(TAG, "访问地址: http://10.10.99.97:%d/", web_config->port);
+        } else {
+            ESP_LOGE(TAG, "Web服务器自动启动失败: %s", esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGI(TAG, "Web服务器未配置为自动启动，请使用命令 'web start' 手动启动");
+    }
+
+    // 16. 显示系统信息
     device_print_full_status();
 
-    // 15. 启动控制台任务
+    // 17. 启动控制台任务
     ret = console_interface_start(8192, 5);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "控制台任务启动失败: %s", esp_err_to_name(ret));

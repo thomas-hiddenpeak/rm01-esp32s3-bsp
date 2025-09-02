@@ -28,6 +28,8 @@
 #include "ethernet_interface.h"
 #include "config_manager.h"
 #include "sdcard_interface.h"
+#include "web_server.h"
+#include "web_server.h"
 
 static const char *TAG = "CONSOLE_INTERFACE";
 
@@ -1610,6 +1612,140 @@ esp_err_t console_interface_register_sdcard_commands(void)
     return ESP_OK;
 }
 
+// ==================== Web Server Console Commands ====================
+
+static int cmd_web_server(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: web <操作>\n");
+        printf("操作:\n");
+        printf("  start                    - 启动web服务\n");
+        printf("  stop                     - 停止web服务\n");
+        printf("  status                   - 显示服务状态\n");
+        printf("  config                   - 显示配置信息\n");
+        printf("  stats                    - 显示统计信息\n");
+        printf("  reset-stats              - 重置统计信息\n");
+        printf("  diagnose                 - 诊断web文件系统\n");
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "start") == 0) {
+        esp_err_t ret = web_server_start();
+        if (ret == ESP_OK) {
+            printf("✅ Web服务已启动，访问地址: http://10.10.99.97/\n");
+        } else {
+            printf("启动Web服务失败: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "stop") == 0) {
+        web_server_stop();
+        printf("✅ Web服务已停止\n");
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "status") == 0) {
+        web_server_status_t status = web_server_get_status();
+        printf("=== Web服务状态 ===\n");
+        switch (status) {
+            case WEB_SERVER_STATUS_STOPPED:
+                printf("状态: 已停止\n");
+                break;
+            case WEB_SERVER_STATUS_STARTING:
+                printf("状态: 启动中\n");
+                break;
+            case WEB_SERVER_STATUS_RUNNING:
+                printf("状态: 运行中\n");
+                printf("访问地址: http://10.10.99.97/\n");
+                break;
+            case WEB_SERVER_STATUS_ERROR:
+                printf("状态: 错误\n");
+                break;
+            default:
+                printf("状态: 未知\n");
+                break;
+        }
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "config") == 0) {
+        const web_server_config_t *config = config_manager_get_web_server_config();
+        if (config) {
+            printf("=== Web服务配置 ===\n");
+            printf("文档根目录: %s\n", config->document_root);
+            printf("端口: %d\n", config->port);
+            printf("自动启动: %s\n", config->auto_start ? "是" : "否");
+            printf("启用CORS: %s\n", config->enable_cors ? "是" : "否");
+            printf("默认索引文件: %s\n", config->default_index);
+        } else {
+            printf("获取配置失败\n");
+        }
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "stats") == 0) {
+        web_server_stats_t stats;
+        esp_err_t ret = web_server_get_stats(&stats);
+        if (ret == ESP_OK) {
+            printf("=== Web服务统计 ===\n");
+            printf("总请求数: %lu\n", (unsigned long)stats.total_requests);
+            printf("活跃会话: %lu\n", (unsigned long)stats.active_sessions);
+            printf("运行时间: %lu秒\n", (unsigned long)stats.uptime_seconds);
+            printf("发送字节: %llu\n", (unsigned long long)stats.bytes_sent);
+            printf("接收字节: %llu\n", (unsigned long long)stats.bytes_received);
+            printf("错误计数: %lu\n", (unsigned long)stats.error_count);
+        } else {
+            printf("获取统计信息失败: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "reset-stats") == 0) {
+        esp_err_t ret = web_server_reset_stats();
+        if (ret == ESP_OK) {
+            printf("统计信息已重置\n");
+        } else {
+            printf("重置统计信息失败: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "diagnose") == 0) {
+        printf("🔍 开始诊断Web文件系统...\n");
+        esp_err_t ret = web_server_diagnose_files();
+        if (ret == ESP_OK) {
+            printf("✅ 诊断完成，请查看上方日志了解详细信息\n");
+        } else {
+            printf("❌ 诊断失败: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+    
+    printf("未知操作: %s\n", argv[1]);
+    printf("使用 'web' 查看帮助\n");
+    return 0;
+}
+
+esp_err_t console_interface_register_web_server_commands(void)
+{
+    const esp_console_cmd_t web_cmd = {
+        .command = "web",
+        .help = "Web服务器管理命令",
+        .hint = NULL,
+        .func = &cmd_web_server,
+    };
+    
+    esp_err_t ret = esp_console_cmd_register(&web_cmd);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register web server commands: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Web server commands registered successfully");
+    return ESP_OK;
+}
+
 esp_err_t console_interface_execute_command(const char *command)
 {
     if (!command) {
@@ -1787,8 +1923,8 @@ static int cmd_help(int argc, char **argv)
     printf("  • 风扇速度范围: 0-100%%, PWM频率: 25kHz\n");
     printf("  • 以太网默认配置: IP 10.10.99.97, DHCP池 10.10.99.101-110\n");
     printf("  • TF卡接口: SDMMC 4-bit, GPIO 4,5,6,7,15,16, 支持FAT32\n");
-    printf("  ✅ 网络配置(eth/dhcp/gateway)修改后自动保存，无需手动save\n");
-    printf("  ⚠️  硬件配置(风扇/LED)修改后需要手动执行 'save' 命令保存\n");
+    printf("  ✅ 网络配置修改后自动保存到NVS\n");
+    printf("  ⚙️  硬件配置修改后需要手动执行 'save' 命令保存，启动时自动加载\n");
     printf("  📖 TF卡详细使用指南: markdown/SDCARD_CONSOLE_COMMANDS.md\n");
     printf("========================================\n");
     return 0;
@@ -1904,6 +2040,16 @@ static int cmd_bled(int argc, char **argv)
         int brightness = atoi(argv[2]);
         if (brightness >= 0 && brightness <= 100) {
             ret = board_led_set_brightness(brightness);
+            if (ret == ESP_OK) {
+                // 获取当前LED配置并更新亮度
+                const led_config_t *current_config = config_manager_get_led_config();
+                if (current_config) {
+                    config_manager_set_led_defaults(brightness, 
+                                                   current_config->board_led_color,
+                                                   current_config->touch_led_color);
+                    printf("板载LED亮度已设置为 %d%% (配置已更新)\n", brightness);
+                }
+            }
         } else {
             printf("亮度必须在0-100之间\n");
             return 1;
@@ -1911,6 +2057,9 @@ static int cmd_bled(int argc, char **argv)
     }
     else if (strcmp(argv[1], "rainbow") == 0) {
         ret = board_led_set_effect(LED_EFFECT_RAINBOW);
+        if (ret == ESP_OK) {
+            printf("板载LED彩虹效果已启用\n");
+        }
     }
     else if (argc >= 4) {
         int r = atoi(argv[1]);
@@ -1920,6 +2069,16 @@ static int cmd_bled(int argc, char **argv)
         if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
             led_color_t color = {r, g, b};
             ret = board_led_set_color(color);
+            if (ret == ESP_OK) {
+                // 获取当前LED配置并更新颜色
+                const led_config_t *current_config = config_manager_get_led_config();
+                if (current_config) {
+                    config_manager_set_led_defaults(current_config->default_brightness,
+                                                   color,
+                                                   current_config->touch_led_color);
+                    printf("板载LED颜色已设置为 RGB(%d,%d,%d) (配置已更新)\n", r, g, b);
+                }
+            }
         } else {
             printf("RGB值必须在0-255之间\n");
             return 1;
@@ -1955,6 +2114,16 @@ static int cmd_tled(int argc, char **argv)
         int brightness = atoi(argv[2]);
         if (brightness >= 0 && brightness <= 100) {
             ret = touch_led_set_brightness(brightness);
+            if (ret == ESP_OK) {
+                // 获取当前LED配置并更新亮度
+                const led_config_t *current_config = config_manager_get_led_config();
+                if (current_config) {
+                    config_manager_set_led_defaults(brightness,
+                                                   current_config->board_led_color,
+                                                   current_config->touch_led_color);
+                    printf("触摸LED亮度已设置为 %d%% (配置已更新)\n", brightness);
+                }
+            }
         } else {
             printf("亮度必须在0-100之间\n");
             return 1;
@@ -1968,6 +2137,16 @@ static int cmd_tled(int argc, char **argv)
         if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
             led_color_t color = {r, g, b};
             ret = touch_led_set_color(color);
+            if (ret == ESP_OK) {
+                // 获取当前LED配置并更新颜色
+                const led_config_t *current_config = config_manager_get_led_config();
+                if (current_config) {
+                    config_manager_set_led_defaults(current_config->default_brightness,
+                                                   current_config->board_led_color,
+                                                   color);
+                    printf("触摸LED颜色已设置为 RGB(%d,%d,%d) (配置已更新)\n", r, g, b);
+                }
+            }
         } else {
             printf("RGB值必须在0-255之间\n");
             return 1;
@@ -2046,19 +2225,25 @@ static int cmd_usbmux(int argc, char **argv)
     if (strcmp(argv[1], "esp32s3") == 0) {
         ret = usb_mux_set_target(USB_MUX_ESP32S3);
         if (ret == ESP_OK) {
-            printf("USB-C接口已切换到ESP32S3\n");
+            // 更新配置管理器中的配置
+            config_manager_set_usb_mux_target(0);
+            printf("USB-C接口已切换到ESP32S3 (配置已更新)\n");
         }
     }
     else if (strcmp(argv[1], "agx") == 0) {
         ret = usb_mux_set_target(USB_MUX_AGX);
         if (ret == ESP_OK) {
-            printf("USB-C接口已切换到AGX\n");
+            // 更新配置管理器中的配置
+            config_manager_set_usb_mux_target(1);
+            printf("USB-C接口已切换到AGX (配置已更新)\n");
         }
     }
     else if (strcmp(argv[1], "lpmu") == 0) {
         ret = usb_mux_set_target(USB_MUX_LPMU);
         if (ret == ESP_OK) {
-            printf("USB-C接口已切换到LPMU\n");
+            // 更新配置管理器中的配置
+            config_manager_set_usb_mux_target(2);
+            printf("USB-C接口已切换到LPMU (配置已更新)\n");
         }
     }
     else if (strcmp(argv[1], "status") == 0) {
@@ -2291,7 +2476,7 @@ static int cmd_test(int argc, char **argv)
 
 static int cmd_save(int argc, char **argv)
 {
-    esp_err_t ret = device_save_config();
+    esp_err_t ret = config_manager_save();
     if (ret != ESP_OK) {
         printf("保存配置失败: %s\n", esp_err_to_name(ret));
         return 1;
@@ -2335,13 +2520,15 @@ static int cmd_config(int argc, char **argv)
         printf("  set eth <ip> <gw> <mask> <dns>  - 设置以太网IP配置 (自动保存)\n");
         printf("  set dhcp <enable> <start> <end> <lease>  - 设置DHCP参数 (自动保存)\n");
         printf("  set gateway <enable> <nat> <firewall>  - 设置网关参数 (自动保存)\n");
-        printf("\n注意: 网络配置(eth/dhcp/gateway)会自动保存到NVS，无需手动执行save命令\n");
+        printf("  set web <root> <port> <autostart>  - 设置Web服务参数 (自动保存)\n");
+        printf("\n注意: 网络配置(eth/dhcp/gateway/web)会自动保存到NVS，无需手动执行save命令\n");
         printf("示例:\n");
         printf("  config set fan 70 0 true     - 设置风扇开启70%%，关闭0%%，启用自动控制\n");
         printf("  config set led 80 0 0 255 0 255 0  - 设置LED亮度80%%，板载蓝色，触摸绿色\n");
         printf("  config set eth 10.10.99.98 10.10.99.1 255.255.255.0 8.8.8.8\n");
         printf("  config set dhcp true 10.10.99.101 10.10.99.110 24\n");
         printf("  config set gateway true true false\n");
+        printf("  config set web /sdcard/web 80 true  - 设置Web服务文档根目录、端口、自动启动\n");
         return 1;
     }
 
@@ -2505,6 +2692,39 @@ static int cmd_config(int argc, char **argv)
                 printf("✅ 网关配置已自动保存到NVS\n");
             }
             
+        } else if (strcmp(argv[2], "web") == 0) {
+            if (argc < 6) {
+                printf("用法: config set web <document_root> <port> <auto_start>\n");
+                return 1;
+            }
+            
+            const char *document_root = argv[3];
+            int port = atoi(argv[4]);
+            bool auto_start = (strcmp(argv[5], "true") == 0 || strcmp(argv[5], "1") == 0);
+            
+            if (port < 1 || port > 65535) {
+                printf("端口号必须在1-65535之间\n");
+                return 1;
+            }
+            
+            printf("设置Web服务参数: 文档根目录=%s, 端口=%d, 自动启动=%s\n",
+                   document_root, port, auto_start ? "是" : "否");
+            esp_err_t ret = config_manager_set_web_server_params(document_root, port, auto_start);
+            if (ret != ESP_OK) {
+                printf("设置Web服务配置失败: %s\n", esp_err_to_name(ret));
+                return 1;
+            }
+            printf("Web服务配置设置成功\n");
+            
+            // 自动保存配置到NVS
+            ret = config_manager_save();
+            if (ret != ESP_OK) {
+                printf("⚠️  警告: Web服务配置已更新但保存失败: %s\n", esp_err_to_name(ret));
+                printf("请手动执行 'save' 命令保存配置\n");
+            } else {
+                printf("✅ Web服务配置已自动保存到NVS\n");
+            }
+            
         } else {
             printf("未知的配置类型: %s\n", argv[2]);
             return 1;
@@ -2530,6 +2750,7 @@ static int cmd_defaults(int argc, char **argv)
         printf("  eth      - 应用以太网默认参数\n");
         printf("  dhcp     - 应用DHCP默认参数\n");
         printf("  gateway  - 应用网关默认参数\n");
+        printf("  web      - 应用Web服务默认参数\n");
         return 1;
     }
 
@@ -2568,6 +2789,13 @@ static int cmd_defaults(int argc, char **argv)
         printf("  NAT转发: 是\n");
         printf("  防火墙: 否\n");
         printf("  自动启动: 是\n");
+        
+        printf("\n[Web服务器默认参数]\n");
+        printf("  文档根目录: /sdcard/web\n");
+        printf("  端口: 80\n");
+        printf("  自动启动: 否\n");
+        printf("  CORS支持: 是\n");
+        printf("  默认首页: index.html\n");
         printf("=================\n\n");
         
     } else if (strcmp(argv[1], "apply") == 0) {
@@ -2658,6 +2886,24 @@ static int cmd_defaults(int argc, char **argv)
             printf("请手动执行 'save' 命令保存配置\n");
         } else {
             printf("✅ 网关默认参数已自动保存到NVS\n");
+        }
+        
+    } else if (strcmp(argv[1], "web") == 0) {
+        printf("应用Web服务默认参数: 文档根目录=/sdcard/web, 端口=80, 自动启动=否\n");
+        esp_err_t ret = config_manager_set_web_server_params("/sdcard/web", 80, false);
+        if (ret != ESP_OK) {
+            printf("设置Web服务默认参数失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+        printf("Web服务默认参数已应用\n");
+        
+        // 自动保存配置到NVS
+        ret = config_manager_save();
+        if (ret != ESP_OK) {
+            printf("⚠️  警告: Web服务默认参数已更新但保存失败: %s\n", esp_err_to_name(ret));
+            printf("请手动执行 'save' 命令保存配置\n");
+        } else {
+            printf("✅ Web服务默认参数已自动保存到NVS\n");
         }
         
     } else {

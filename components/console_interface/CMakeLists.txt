@@ -21,6 +21,7 @@ idf_component_register(
         system_monitor
         ethernet_interface
         config_manager
+        web_server
     PRIV_REQUIRES
         driver
         sdcard_interface

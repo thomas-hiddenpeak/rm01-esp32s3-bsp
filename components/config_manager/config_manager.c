@@ -34,6 +34,8 @@ static void trigger_config_event(config_event_t event, const char *message);
 static esp_err_t apply_fan_config(const fan_config_t *config);
 static esp_err_t apply_led_config(const led_config_t *config);
 static esp_err_t apply_ethernet_config(const ethernet_config_t *config);
+static esp_err_t apply_usb_mux_config(const usb_mux_config_t *config);
+static esp_err_t apply_web_server_config(const web_server_config_t *config);
 
 // ==================== Main API Functions ====================
 
@@ -256,6 +258,18 @@ esp_err_t config_manager_apply_config(void)
         ESP_LOGE(TAG, "Failed to apply ethernet configuration: %s", esp_err_to_name(ret));
     }
 
+    // Apply USB MUX configuration
+    ret = apply_usb_mux_config(&s_current_config.usb_mux);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to apply USB MUX configuration: %s", esp_err_to_name(ret));
+    }
+
+    // Apply web server configuration (if auto_start is enabled)
+    ret = apply_web_server_config(&s_current_config.web);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to apply web server configuration: %s", esp_err_to_name(ret));
+    }
+
     ESP_LOGI(TAG, "Configuration applied to all subsystems");
     return ESP_OK;
 }
@@ -277,6 +291,11 @@ const led_config_t* config_manager_get_led_config(void)
     return s_initialized ? &s_current_config.led : NULL;
 }
 
+const usb_mux_config_t* config_manager_get_usb_mux_config(void)
+{
+    return s_initialized ? &s_current_config.usb_mux : NULL;
+}
+
 const ethernet_config_t* config_manager_get_ethernet_config(void)
 {
     return s_initialized ? &s_current_config.ethernet : NULL;
@@ -295,6 +314,11 @@ const gateway_config_t* config_manager_get_gateway_config(void)
 const system_config_t* config_manager_get_system_config(void)
 {
     return s_initialized ? &s_current_config.system : NULL;
+}
+
+const web_server_config_t* config_manager_get_web_server_config(void)
+{
+    return s_initialized ? &s_current_config.web : NULL;
 }
 
 // ==================== Configuration Setters ====================
@@ -402,6 +426,30 @@ esp_err_t config_manager_set_system_config(const system_config_t *config)
     return ESP_OK;
 }
 
+esp_err_t config_manager_set_web_server_config(const web_server_config_t *config)
+{
+    if (!s_initialized || !config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Validate web server configuration
+    if (config->port == 0) {
+        ESP_LOGE(TAG, "Invalid port number (must be 1-65535)");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (strlen(config->document_root) == 0) {
+        ESP_LOGE(TAG, "Document root cannot be empty");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.web = *config;
+    s_current_config.checksum = calculate_config_checksum(&s_current_config);
+    
+    ESP_LOGI(TAG, "Web server configuration updated");
+    return ESP_OK;
+}
+
 // ==================== Individual Parameter Functions ====================
 
 esp_err_t config_manager_set_fan_speed(uint8_t speed_on, uint8_t speed_off)
@@ -444,6 +492,24 @@ esp_err_t config_manager_set_led_defaults(uint8_t brightness,
     ESP_LOGI(TAG, "LED defaults updated: brightness=%d%%, board_color=(%d,%d,%d), touch_color=(%d,%d,%d)",
              brightness, board_color.red, board_color.green, board_color.blue,
              touch_color.red, touch_color.green, touch_color.blue);
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_usb_mux_target(uint8_t target)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (target > 2) {
+        ESP_LOGE(TAG, "Invalid USB MUX target (must be 0-2)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.usb_mux.default_target = target;
+    s_current_config.checksum = calculate_config_checksum(&s_current_config);
+    
+    ESP_LOGI(TAG, "USB MUX target updated: %d", target);
     return ESP_OK;
 }
 
@@ -496,6 +562,15 @@ esp_err_t config_manager_set_ethernet_ip_from_strings(const char *ip_addr, const
     
     ESP_LOGI(TAG, "Ethernet IP configuration updated: IP=%s, Gateway=%s, Netmask=%s, DNS=%s",
              ip_addr, gateway, netmask, dns_server);
+    
+    // 立即同步配置到以太网接口
+    esp_err_t sync_ret = ethernet_save_config_from_manager(&s_current_config.ethernet);
+    if (sync_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to sync ethernet config to interface: %s", esp_err_to_name(sync_ret));
+    } else {
+        ESP_LOGI(TAG, "✅ 以太网配置已同步到接口");
+    }
+    
     return ESP_OK;
 }
 
@@ -521,6 +596,24 @@ esp_err_t config_manager_set_dhcp_params(bool enable, const char *start_ip,
     
     ESP_LOGI(TAG, "DHCP parameters updated: enable=%s, start=%s, end=%s, lease=%dh",
              enable ? "true" : "false", start_ip, end_ip, lease_time);
+    
+    // 立即同步DHCP配置到以太网接口
+    esp_err_t sync_ret = ethernet_set_dhcp_server(enable);
+    if (sync_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to sync DHCP server enable to interface: %s", esp_err_to_name(sync_ret));
+    } else {
+        ESP_LOGI(TAG, "✅ DHCP服务器状态已同步到接口");
+    }
+    
+    if (enable) {
+        sync_ret = ethernet_set_dhcp_pool(start_ip, end_ip, lease_time);
+        if (sync_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to sync DHCP pool to interface: %s", esp_err_to_name(sync_ret));
+        } else {
+            ESP_LOGI(TAG, "✅ DHCP池配置已同步到接口");
+        }
+    }
+    
     return ESP_OK;
 }
 
@@ -539,6 +632,41 @@ esp_err_t config_manager_set_gateway_params(bool enable, bool nat_enable, bool f
     ESP_LOGI(TAG, "Gateway parameters updated: enable=%s, NAT=%s, firewall=%s",
              enable ? "true" : "false", nat_enable ? "true" : "false", 
              firewall_enable ? "true" : "false");
+    
+    // 立即同步网关配置到以太网接口
+    esp_err_t sync_ret = ethernet_set_gateway(enable);
+    if (sync_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to sync gateway enable to interface: %s", esp_err_to_name(sync_ret));
+    } else {
+        ESP_LOGI(TAG, "✅ 网关状态已同步到接口");
+    }
+    
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_web_server_params(const char *document_root, uint16_t port, bool auto_start)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (!document_root || strlen(document_root) == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (port == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    strncpy(s_current_config.web.document_root, document_root, sizeof(s_current_config.web.document_root) - 1);
+    s_current_config.web.document_root[sizeof(s_current_config.web.document_root) - 1] = '\0';
+    s_current_config.web.port = port;
+    s_current_config.web.auto_start = auto_start;
+    
+    s_current_config.checksum = calculate_config_checksum(&s_current_config);
+    
+    ESP_LOGI(TAG, "Web server parameters updated: root=%s, port=%d, auto_start=%s",
+             document_root, port, auto_start ? "true" : "false");
     return ESP_OK;
 }
 
@@ -617,6 +745,13 @@ void config_manager_print_config(void)
     printf("  NAT Enabled: %s\n", s_current_config.gateway.nat_enable ? "Yes" : "No");
     printf("  Firewall Enabled: %s\n", s_current_config.gateway.firewall_enable ? "Yes" : "No");
     printf("  Auto Start: %s\n", s_current_config.gateway.auto_start ? "Yes" : "No");
+    
+    printf("\n[Web Server Configuration]\n");
+    printf("  Document Root: %s\n", s_current_config.web.document_root);
+    printf("  Port: %d\n", s_current_config.web.port);
+    printf("  Auto Start: %s\n", s_current_config.web.auto_start ? "Yes" : "No");
+    printf("  CORS Enabled: %s\n", s_current_config.web.enable_cors ? "Yes" : "No");
+    printf("  Default Index: %s\n", s_current_config.web.default_index);
     
     printf("\n[System Configuration]\n");
     printf("  Auto Save Config: %s\n", s_current_config.system.auto_save_config ? "Yes" : "No");
@@ -777,6 +912,47 @@ static esp_err_t apply_ethernet_config(const ethernet_config_t *config)
     
     // Note: Ethernet configuration is already handled by ethernet_interface_init()
     // This function just logs the configuration being applied
+    
+    return ESP_OK;
+}
+
+static esp_err_t apply_usb_mux_config(const usb_mux_config_t *config)
+{
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Applying USB MUX configuration: target=%d, auto_restore=%s",
+             config->default_target, config->auto_restore ? "enabled" : "disabled");
+    
+    if (config->auto_restore) {
+        // Apply USB MUX target using hardware control interface
+        esp_err_t ret = usb_mux_set_target((usb_mux_target_t)config->default_target);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set USB MUX target to %d: %s", 
+                     config->default_target, esp_err_to_name(ret));
+            return ret;
+        }
+        ESP_LOGI(TAG, "USB MUX initialized to target: %d", config->default_target);
+    } else {
+        ESP_LOGI(TAG, "USB MUX auto restore disabled, keeping current target");
+    }
+    
+    return ESP_OK;
+}
+
+static esp_err_t apply_web_server_config(const web_server_config_t *config)
+{
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Applying web server configuration: root=%s, port=%d, auto_start=%s",
+             config->document_root, config->port, config->auto_start ? "enabled" : "disabled");
+    
+    // Note: Web server configuration is managed by the web_server component
+    // This function just logs the configuration being applied
+    // The actual web server start/stop is handled in main.c based on auto_start flag
     
     return ESP_OK;
 }

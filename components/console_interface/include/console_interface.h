@@ -138,6 +138,15 @@ esp_err_t console_interface_register_ethernet_commands(void);
 esp_err_t console_interface_register_sdcard_commands(void);
 
 /**
+ * @brief Register web server commands
+ * 
+ * This function registers web server-related commands like start, stop, status, config.
+ * 
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t console_interface_register_web_server_commands(void);
+
+/**
  * @brief Execute a console command programmatically
  * 
  * @param command Command string to execute

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32S3 BSP - 文件系统测试</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            margin: 20px;
+            background-color: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .status-good { color: #27ae60; font-weight: bold; }
+        .status-bad { color: #e74c3c; font-weight: bold; }
+        .debug-section {
+            background-color: #ecf0f1;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #3498db;
+            font-family: 'Courier New', monospace;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover { background-color: #2980b9; }
+        .response {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .file-test {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 ESP32S3 Web服务器 - 文件系统调试</h1>
+        
+        <div class="debug-section">
+            <h3>📊 测试状态</h3>
+            <p><strong>文件来源:</strong> <span class="status-good">✅ 成功从 /sdcard/web/index.html 加载</span></p>
+            <p><strong>时间戳:</strong> <span id="timestamp"></span></p>
+            <p><strong>页面大小:</strong> <span id="pageSize"></span> 字节</p>
+        </div>
+
+        <div class="debug-section">
+            <h3>🌐 API 测试</h3>
+            <button onclick="testAPI('/api/status')">测试 /api/status</button>
+            <button onclick="testAPI('/api/info')">测试 /api/info</button>
+            <button onclick="testFileAccess()">测试文件访问</button>
+            <div id="apiResponse" class="response" style="display:none;"></div>
+        </div>
+
+        <div class="debug-section">
+            <h3>📁 文件系统信息</h3>
+            <div id="fileSystemInfo">
+                <p>🗂️ <strong>默认文档根目录:</strong> /sdcard/web</p>
+                <p>📄 <strong>默认首页:</strong> index.html</p>
+                <p>🔗 <strong>当前URL:</strong> <span id="currentURL"></span></p>
+                <p>📡 <strong>服务器:</strong> ESP32S3 HTTP Server</p>
+            </div>
+        </div>
+
+        <div class="debug-section">
+            <h3>🧪 调试测试</h3>
+            <div class="file-test">
+                <h4>文件访问测试</h4>
+                <p>如果您看到这个页面，说明:</p>
+                <ul>
+                    <li class="status-good">✅ SD卡已正确挂载</li>
+                    <li class="status-good">✅ /sdcard/web 目录可访问</li>
+                    <li class="status-good">✅ index.html 文件读取成功</li>
+                    <li class="status-good">✅ HTTP服务器正常工作</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="debug-section">
+            <h3>📋 下一步检查</h3>
+            <ol>
+                <li>检查控制台输出中的详细日志</li>
+                <li>确认SD卡中的文件结构</li>
+                <li>测试其他文件类型的访问</li>
+                <li>验证API端点的响应</li>
+            </ol>
+        </div>
+
+        <div class="debug-section">
+            <h3>💾 建议的文件结构</h3>
+            <div class="response">
+/sdcard/web/
+├── index.html (这个文件)
+├── test.txt (可选测试文件)
+├── favicon.ico (可选)
+└── images/ (可选目录)
+    └── logo.png
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 更新时间戳
+        function updateTimestamp() {
+            document.getElementById('timestamp').textContent = new Date().toLocaleString('zh-CN');
+        }
+        
+        // 更新当前URL
+        function updateCurrentURL() {
+            document.getElementById('currentURL').textContent = window.location.href;
+        }
+        
+        // 计算页面大小
+        function updatePageSize() {
+            const pageContent = document.documentElement.outerHTML;
+            document.getElementById('pageSize').textContent = pageContent.length;
+        }
+        
+        // 显示API响应
+        function showResponse(data, url) {
+            const responseDiv = document.getElementById('apiResponse');
+            const timestamp = new Date().toLocaleString('zh-CN');
+            const response = `[${timestamp}] 请求: ${url}\n` + JSON.stringify(data, null, 2) + '\n\n';
+            
+            if (responseDiv.style.display === 'none') {
+                responseDiv.textContent = response;
+            } else {
+                responseDiv.textContent = response + responseDiv.textContent;
+            }
+            responseDiv.style.display = 'block';
+        }
+
+        // 测试API
+        function testAPI(endpoint) {
+            fetch(endpoint)
+                .then(response => response.json())
+                .then(data => showResponse(data, endpoint))
+                .catch(error => showResponse({error: error.message}, endpoint));
+        }
+        
+        // 测试文件访问
+        function testFileAccess() {
+            const testFiles = ['/test.txt', '/nonexistent.html', '/favicon.ico'];
+            
+            testFiles.forEach(file => {
+                fetch(file)
+                    .then(response => {
+                        const status = response.ok ? 'SUCCESS' : 'NOT_FOUND';
+                        showResponse({
+                            file: file,
+                            status: status,
+                            statusCode: response.status,
+                            contentType: response.headers.get('content-type')
+                        }, `FILE_TEST ${file}`);
+                    })
+                    .catch(error => {
+                        showResponse({
+                            file: file,
+                            status: 'ERROR',
+                            error: error.message
+                        }, `FILE_TEST ${file}`);
+                    });
+            });
+        }
+
+        // 页面加载时初始化
+        window.onload = function() {
+            updateTimestamp();
+            updateCurrentURL();
+            updatePageSize();
+            
+            // 自动测试API状态
+            setTimeout(() => testAPI('/api/status'), 1000);
+        };
+        
+        // 每秒更新时间戳
+        setInterval(updateTimestamp, 1000);
+    </script>
+</body>
+</html>

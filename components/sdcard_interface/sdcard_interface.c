@@ -260,6 +260,43 @@ bool sdcard_is_present(void)
     return (s_status == SDCARD_STATUS_INITIALIZED || s_status == SDCARD_STATUS_MOUNTED);
 }
 
+esp_err_t sdcard_auto_mount(const char* mount_point)
+{
+    ESP_LOGI(TAG, "开始自动检测SD卡...");
+    
+    // 如果已经挂载，直接返回成功
+    if (s_status == SDCARD_STATUS_MOUNTED) {
+        ESP_LOGI(TAG, "SD卡已挂载在 %s", s_mount_point);
+        return ESP_OK;
+    }
+    
+    // 尝试初始化SD卡接口
+    esp_err_t ret = sdcard_init();
+    if (ret != ESP_OK) {
+        ESP_LOGD(TAG, "SD卡接口初始化失败: %s", esp_err_to_name(ret));
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    // 尝试挂载SD卡
+    const char* target_mount_point = mount_point ? mount_point : "/sdcard";
+    ret = sdcard_mount(target_mount_point);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "✅ SD卡自动挂载成功到: %s", target_mount_point);
+        
+        // 显示SD卡信息
+        sdcard_info_t info;
+        if (sdcard_get_info(&info) == ESP_OK) {
+            ESP_LOGI(TAG, "SD卡: %s, %s, %.2f MB", 
+                    info.name, info.type, (double)info.capacity / (1024 * 1024));
+        }
+        
+        return ESP_OK;
+    } else {
+        ESP_LOGD(TAG, "未检测到SD卡或挂载失败: %s", esp_err_to_name(ret));
+        return ESP_ERR_NOT_FOUND;
+    }
+}
+
 esp_err_t sdcard_format(void)
 {
     if (s_card == NULL) {

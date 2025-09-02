@@ -38,6 +38,7 @@ typedef struct {
 } dhcps_lease_t;
 #include "lwip/icmp.h"
 #include "lwip/dhcp.h"
+#include "config_manager.h"
 #include "esp_console.h"
 #include "argtable3/argtable3.h"
 #include <fcntl.h>
@@ -183,6 +184,8 @@ esp_err_t ethernet_interface_init(const ethernet_config_t *config)
         
         // Save the provided config as the initial NVS config
         ethernet_save_config_to_nvs();
+    } else {
+        ESP_LOGI(TAG, "✅ 配置已从ethernet_interface的NVS存储加载");
     }
 
     // Initialize hardware
@@ -1452,6 +1455,24 @@ static int cmd_eth_dhcp(int argc, char **argv)
             esp_err_t ret = ethernet_set_dhcp_server(true);
             if (ret == ESP_OK) {
                 printf("DHCP server enabled\n");
+                // Update config manager
+                ethernet_config_t current_config;
+                if (ethernet_get_config(&current_config) == ESP_OK) {
+                    dhcp_config_t dhcp_config = {
+                        .enable = true,
+                        .lease_time_hours = current_config.dhcp_lease_time,
+                        .max_clients = 10,  // Default value
+                        .auto_start = true  // Default value
+                    };
+                    // Convert IP addresses to string format
+                    char start_ip_str[16], end_ip_str[16];
+                    ip_to_string(current_config.dhcp_start_ip, start_ip_str, sizeof(start_ip_str));
+                    ip_to_string(current_config.dhcp_end_ip, end_ip_str, sizeof(end_ip_str));
+                    strncpy(dhcp_config.start_ip, start_ip_str, sizeof(dhcp_config.start_ip) - 1);
+                    strncpy(dhcp_config.end_ip, end_ip_str, sizeof(dhcp_config.end_ip) - 1);
+                    
+                    config_manager_set_dhcp_config(&dhcp_config);
+                }
             } else {
                 printf("Failed to enable DHCP server: %s\n", esp_err_to_name(ret));
             }
@@ -1460,6 +1481,24 @@ static int cmd_eth_dhcp(int argc, char **argv)
             esp_err_t ret = ethernet_set_dhcp_server(false);
             if (ret == ESP_OK) {
                 printf("DHCP server disabled\n");
+                // Update config manager
+                ethernet_config_t current_config;
+                if (ethernet_get_config(&current_config) == ESP_OK) {
+                    dhcp_config_t dhcp_config = {
+                        .enable = false,
+                        .lease_time_hours = current_config.dhcp_lease_time,
+                        .max_clients = 10,  // Default value
+                        .auto_start = false  // Default value
+                    };
+                    // Convert IP addresses to string format
+                    char start_ip_str[16], end_ip_str[16];
+                    ip_to_string(current_config.dhcp_start_ip, start_ip_str, sizeof(start_ip_str));
+                    ip_to_string(current_config.dhcp_end_ip, end_ip_str, sizeof(end_ip_str));
+                    strncpy(dhcp_config.start_ip, start_ip_str, sizeof(dhcp_config.start_ip) - 1);
+                    strncpy(dhcp_config.end_ip, end_ip_str, sizeof(dhcp_config.end_ip) - 1);
+                    
+                    config_manager_set_dhcp_config(&dhcp_config);
+                }
             } else {
                 printf("Failed to disable DHCP server: %s\n", esp_err_to_name(ret));
             }
@@ -1520,6 +1559,24 @@ static int cmd_eth_dhcp(int argc, char **argv)
         esp_err_t ret = ethernet_set_dhcp_pool(argv[2], argv[3], lease_time);
         if (ret == ESP_OK) {
             printf("DHCP pool updated: %s - %s (lease: %d hours)\n", argv[2], argv[3], lease_time);
+            // Update config manager
+            ethernet_config_t current_config;
+            if (ethernet_get_config(&current_config) == ESP_OK) {
+                dhcp_config_t dhcp_config = {
+                    .enable = current_config.dhcp_server_enabled,
+                    .lease_time_hours = current_config.dhcp_lease_time,
+                    .max_clients = 10,  // Default value
+                    .auto_start = current_config.dhcp_server_enabled  // Use current setting
+                };
+                // Convert IP addresses to string format
+                char start_ip_str[16], end_ip_str[16];
+                ip_to_string(current_config.dhcp_start_ip, start_ip_str, sizeof(start_ip_str));
+                ip_to_string(current_config.dhcp_end_ip, end_ip_str, sizeof(end_ip_str));
+                strncpy(dhcp_config.start_ip, start_ip_str, sizeof(dhcp_config.start_ip) - 1);
+                strncpy(dhcp_config.end_ip, end_ip_str, sizeof(dhcp_config.end_ip) - 1);
+                
+                config_manager_set_dhcp_config(&dhcp_config);
+            }
         } else {
             printf("Failed to update DHCP pool: %s\n", esp_err_to_name(ret));
         }
@@ -1536,6 +1593,24 @@ static int cmd_eth_dhcp(int argc, char **argv)
         esp_err_t ret = ethernet_set_dhcp_pool(argv[2], argv[3], lease_time);
         if (ret == ESP_OK) {
             printf("DHCP pool updated: %s - %s (lease: %d hours)\n", argv[2], argv[3], lease_time);
+            // Update config manager
+            ethernet_config_t current_config;
+            if (ethernet_get_config(&current_config) == ESP_OK) {
+                dhcp_config_t dhcp_config = {
+                    .enable = current_config.dhcp_server_enabled,
+                    .lease_time_hours = current_config.dhcp_lease_time,
+                    .max_clients = 10,  // Default value
+                    .auto_start = current_config.dhcp_server_enabled  // Use current setting
+                };
+                // Convert IP addresses to string format
+                char start_ip_str[16], end_ip_str[16];
+                ip_to_string(current_config.dhcp_start_ip, start_ip_str, sizeof(start_ip_str));
+                ip_to_string(current_config.dhcp_end_ip, end_ip_str, sizeof(end_ip_str));
+                strncpy(dhcp_config.start_ip, start_ip_str, sizeof(dhcp_config.start_ip) - 1);
+                strncpy(dhcp_config.end_ip, end_ip_str, sizeof(dhcp_config.end_ip) - 1);
+                
+                config_manager_set_dhcp_config(&dhcp_config);
+            }
         } else {
             printf("Failed to update DHCP pool: %s\n", esp_err_to_name(ret));
         }
@@ -1577,6 +1652,17 @@ static int cmd_eth_gateway(int argc, char **argv)
             printf("Gateway service %s\n", enable ? "enabled" : "disabled");
             if (enable) {
                 printf("ESP32S3 is now acting as a gateway\n");
+            }
+            // Update config manager
+            ethernet_config_t current_config;
+            if (ethernet_get_config(&current_config) == ESP_OK) {
+                gateway_config_t gateway_config = {
+                    .enable = enable,
+                    .nat_enable = current_config.gateway_enabled,  // Use current setting
+                    .firewall_enable = false,  // Default setting
+                    .auto_start = enable  // Set auto_start based on enable
+                };
+                config_manager_set_gateway_config(&gateway_config);
             }
         } else {
             printf("Failed to %s gateway service: %s\n", enable ? "enable" : "disable", esp_err_to_name(ret));
@@ -2144,4 +2230,30 @@ esp_err_t ethernet_release_dhcp_lease(const uint8_t *mac_addr)
     }
 
     return dhcp_remove_client(mac_addr);
+}
+
+esp_err_t ethernet_save_config_from_manager(const ethernet_config_t *config)
+{
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_eth_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Saving configuration from config manager to ethernet interface");
+    
+    // Update current configuration
+    memcpy(&s_eth_state.config, config, sizeof(ethernet_config_t));
+    
+    // Save to NVS
+    esp_err_t ret = ethernet_save_config_to_nvs();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save config from manager: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ESP_LOGI(TAG, "Configuration from config manager saved successfully");
+    return ESP_OK;
 }
