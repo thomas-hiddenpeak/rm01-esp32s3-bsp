@@ -58,6 +58,7 @@ static int cmd_reboot(int argc, char **argv);
 static int cmd_fan(int argc, char **argv);
 static int cmd_bled(int argc, char **argv);
 static int cmd_tled(int argc, char **argv);
+static int cmd_matrix(int argc, char **argv);
 static int cmd_gpio(int argc, char **argv);
 static int cmd_usbmux(int argc, char **argv);
 static int cmd_agx(int argc, char **argv);
@@ -244,6 +245,11 @@ esp_err_t console_interface_register_device_commands(void)
             .func = &cmd_tled,
         },
         {
+            .command = "matrix",
+            .help = "LED矩阵控制: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>",
+            .func = &cmd_matrix,
+        },
+        {
             .command = "gpio",
             .help = "GPIO控制: gpio <pin> high|low|input",
             .func = &cmd_gpio,
@@ -265,7 +271,7 @@ esp_err_t console_interface_register_device_commands(void)
         },
         {
             .command = "test",
-            .help = "硬件测试: test fan|bled|tled|gpio <pin>|gpio_input <pin>|agx|lpmu|all|quick|stress <ms>",
+            .help = "硬件测试: test fan|bled|tled|matrix|gpio <pin>|gpio_input <pin>|agx|lpmu|all|quick|stress <ms>",
             .func = &cmd_test,
         }
     };
@@ -2396,7 +2402,7 @@ static int cmd_lpmu(int argc, char **argv)
 static int cmd_test(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("用法: test fan|bled|tled|gpio <pin>|gpio_input <pin>|agx|lpmu|all|quick|stress <ms>\n");
+        printf("用法: test fan|bled|tled|matrix|gpio <pin>|gpio_input <pin>|agx|lpmu|all|quick|stress <ms>\n");
         return 1;
     }
     
@@ -2410,6 +2416,13 @@ static int cmd_test(int argc, char **argv)
     }
     else if (strcmp(argv[1], "tled") == 0) {
         ret = hardware_test_touch_led();
+    }
+    else if (strcmp(argv[1], "matrix") == 0) {
+        printf("开始LED矩阵测试...\n");
+        ret = led_matrix_test_pattern();
+        if (ret == ESP_OK) {
+            printf("LED矩阵测试完成\n");
+        }
     }
     else if (strcmp(argv[1], "gpio") == 0) {
         if (argc < 3) {
@@ -2971,4 +2984,106 @@ static void console_task(void *pvParameters)
     
     // 任务结束
     vTaskDelete(NULL);
+}
+
+static int cmd_matrix(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>\n");
+        printf("示例:\n");
+        printf("  matrix clear                    - 清空LED矩阵\n");
+        printf("  matrix test                     - 显示测试图案\n");
+        printf("  matrix bright 50                - 设置亮度为50%%\n");
+        printf("  matrix pixel 10 15 255 0 0      - 在(10,15)位置显示红色像素\n");
+        printf("  matrix load Logo                - 加载名为'Logo'的动画\n");
+        return 1;
+    }
+    
+    esp_err_t ret = ESP_OK;
+    
+    if (strcmp(argv[1], "clear") == 0) {
+        ret = led_matrix_clear();
+        if (ret == ESP_OK) {
+            printf("LED矩阵已清空\n");
+        }
+    }
+    else if (strcmp(argv[1], "test") == 0) {
+        ret = led_matrix_test_pattern();
+        if (ret == ESP_OK) {
+            printf("LED矩阵测试图案已显示\n");
+        }
+    }
+    else if (strcmp(argv[1], "bright") == 0) {
+        if (argc < 3) {
+            printf("用法: matrix bright <0-100>\n");
+            return 1;
+        }
+        int brightness = atoi(argv[2]);
+        if (brightness >= 0 && brightness <= 100) {
+            ret = led_matrix_set_brightness(brightness);
+            if (ret == ESP_OK) {
+                printf("LED矩阵亮度已设置为 %d%%\n", brightness);
+            }
+        } else {
+            printf("亮度必须在0-100之间\n");
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "pixel") == 0) {
+        if (argc < 7) {
+            printf("用法: matrix pixel <x> <y> <r> <g> <b>\n");
+            printf("坐标范围: x,y = 0-31, 颜色范围: r,g,b = 0-255\n");
+            return 1;
+        }
+        
+        int x = atoi(argv[2]);
+        int y = atoi(argv[3]);
+        int r = atoi(argv[4]);
+        int g = atoi(argv[5]);
+        int b = atoi(argv[6]);
+        
+        if (x >= 0 && x < 32 && y >= 0 && y < 32 &&
+            r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+            
+            led_color_t color = {r, g, b};
+            ret = led_matrix_set_pixel(x, y, color);
+            if (ret == ESP_OK) {
+                ret = led_matrix_refresh();
+                if (ret == ESP_OK) {
+                    printf("像素(%d,%d)已设置为RGB(%d,%d,%d)\n", x, y, r, g, b);
+                }
+            }
+        } else {
+            printf("参数超出范围 - 坐标:0-31, 颜色:0-255\n");
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "load") == 0) {
+        if (argc < 3) {
+            printf("用法: matrix load <animation_name>\n");
+            printf("可用动画: Logo (从/sdcard/matrix.json加载)\n");
+            return 1;
+        }
+        
+        ret = led_matrix_load_animation(argv[2]);
+        if (ret == ESP_OK) {
+            printf("动画 '%s' 已加载并显示\n", argv[2]);
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            printf("未找到动画 '%s'\n", argv[2]);
+        } else if (ret == ESP_FAIL) {
+            printf("加载动画失败，请检查SD卡和文件\n");
+        }
+    }
+    else {
+        printf("未知命令: %s\n", argv[1]);
+        printf("用法: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>\n");
+        return 1;
+    }
+    
+    if (ret != ESP_OK) {
+        printf("LED矩阵控制失败: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    
+    return 0;
 }

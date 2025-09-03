@@ -12,6 +12,7 @@
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "led_strip.h"
+#include "cJSON.h"
 
 static const char *TAG = "HARDWARE_CONTROL";
 
@@ -21,6 +22,9 @@ static bool s_initialized = false;
 static hardware_status_t s_hardware_status = {0};
 static led_strip_handle_t s_board_led_strip = NULL;
 static led_strip_handle_t s_touch_led_strip = NULL;
+static led_strip_handle_t s_matrix_led_strip = NULL;
+static uint8_t s_matrix_brightness = DEFAULT_LED_BRIGHTNESS;
+static led_color_t s_matrix_buffer[LED_MATRIX_NUM]; // 添加矩阵缓冲区
 
 // ==================== 静态函数声明 ====================
 
@@ -1184,12 +1188,34 @@ static esp_err_t init_ws2812(void)
         return ret;
     }
 
-    // Clear both LED strips
+    // LED Matrix strip configuration
+    led_strip_config_t matrix_strip_config = {
+        .strip_gpio_num = LED_MATRIX_PIN,
+        .max_leds = LED_MATRIX_NUM,
+    };
+    
+    led_strip_rmt_config_t matrix_rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = LED_RMT_CLK_FREQ,
+        .flags.with_dma = false,
+    };
+    
+    ret = led_strip_new_rmt_device(&matrix_strip_config, &matrix_rmt_config, &s_matrix_led_strip);
+    if (ret != ESP_OK) {
+        led_strip_del(s_board_led_strip);
+        led_strip_del(s_touch_led_strip);
+        s_board_led_strip = NULL;
+        s_touch_led_strip = NULL;
+        return ret;
+    }
+
+    // Clear all LED strips
     ESP_ERROR_CHECK(led_strip_clear(s_board_led_strip));
     ESP_ERROR_CHECK(led_strip_clear(s_touch_led_strip));
+    ESP_ERROR_CHECK(led_strip_clear(s_matrix_led_strip));
     
-    ESP_LOGI(TAG, "WS2812 initialized - Board: GPIO%d (%d LEDs), Touch: GPIO%d (%d LEDs)", 
-             BOARD_WS2812_PIN, BOARD_WS2812_NUM, TOUCH_WS2812_PIN, TOUCH_WS2812_NUM);
+    ESP_LOGI(TAG, "WS2812 initialized - Board: GPIO%d (%d LEDs), Touch: GPIO%d (%d LEDs), Matrix: GPIO%d (%d LEDs)", 
+             BOARD_WS2812_PIN, BOARD_WS2812_NUM, TOUCH_WS2812_PIN, TOUCH_WS2812_NUM, LED_MATRIX_PIN, LED_MATRIX_NUM);
     return ESP_OK;
 }
 
@@ -1446,4 +1472,279 @@ static esp_err_t disable_jtag_for_gpio40(void)
     ESP_LOGI(TAG, "JTAG disable procedure completed for GPIO40");
     ESP_LOGI(TAG, "Note: USB Serial JTAG is disabled in sdkconfig (CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n)");
     return ESP_OK;
+}
+
+// ==================== LED矩阵控制接口实现 ====================
+
+esp_err_t led_matrix_init(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_matrix_led_strip == NULL) {
+        ESP_LOGE(TAG, "LED matrix strip not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // 初始化矩阵缓冲区为黑色
+    memset(s_matrix_buffer, 0, sizeof(s_matrix_buffer));
+
+    ESP_LOGI(TAG, "LED matrix initialized successfully");
+    return ESP_OK;
+}
+
+static esp_err_t led_matrix_apply_buffer(void)
+{
+    if (!s_initialized || s_matrix_led_strip == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    for (int i = 0; i < LED_MATRIX_NUM; i++) {
+        uint8_t r = (s_matrix_buffer[i].red * s_matrix_brightness) / 100;
+        uint8_t g = (s_matrix_buffer[i].green * s_matrix_brightness) / 100;
+        uint8_t b = (s_matrix_buffer[i].blue * s_matrix_brightness) / 100;
+        
+        esp_err_t ret = led_strip_set_pixel(s_matrix_led_strip, i, r, g, b);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    
+    return led_strip_refresh(s_matrix_led_strip);
+}
+
+esp_err_t led_matrix_set_pixel(uint8_t x, uint8_t y, led_color_t color)
+{
+    if (!s_initialized || s_matrix_led_strip == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (x >= LED_MATRIX_WIDTH || y >= LED_MATRIX_HEIGHT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 计算线性索引 (行主序)
+    uint32_t index = y * LED_MATRIX_WIDTH + x;
+    
+    // 保存原始颜色到缓冲区
+    s_matrix_buffer[index] = color;
+    
+    // 应用亮度调整并设置到LED strip
+    uint8_t r = (color.red * s_matrix_brightness) / 100;
+    uint8_t g = (color.green * s_matrix_brightness) / 100;
+    uint8_t b = (color.blue * s_matrix_brightness) / 100;
+
+    return led_strip_set_pixel(s_matrix_led_strip, index, r, g, b);
+}
+
+esp_err_t led_matrix_clear(void)
+{
+    if (!s_initialized || s_matrix_led_strip == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // 清空缓冲区
+    memset(s_matrix_buffer, 0, sizeof(s_matrix_buffer));
+
+    // 清空LED strip并刷新
+    esp_err_t ret = led_strip_clear(s_matrix_led_strip);
+    if (ret == ESP_OK) {
+        ret = led_strip_refresh(s_matrix_led_strip);
+    }
+    return ret;
+}
+
+esp_err_t led_matrix_refresh(void)
+{
+    if (!s_initialized || s_matrix_led_strip == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return led_strip_refresh(s_matrix_led_strip);
+}
+
+esp_err_t led_matrix_set_brightness(uint8_t brightness)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (brightness > 100) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_matrix_brightness = brightness;
+    ESP_LOGI(TAG, "LED matrix brightness set to %d%%", brightness);
+    
+    // 立即应用新的亮度到当前显示的内容
+    return led_matrix_apply_buffer();
+}
+
+esp_err_t led_matrix_test_pattern(void)
+{
+    if (!s_initialized || s_matrix_led_strip == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Displaying LED matrix test pattern");
+
+    // 清空矩阵
+    led_matrix_clear();
+
+    // 创建简单的测试图案
+    for (int y = 0; y < LED_MATRIX_HEIGHT; y++) {
+        for (int x = 0; x < LED_MATRIX_WIDTH; x++) {
+            led_color_t color = {0, 0, 0};
+            
+            // 边框
+            if (x == 0 || x == LED_MATRIX_WIDTH - 1 || 
+                y == 0 || y == LED_MATRIX_HEIGHT - 1) {
+                color.red = 255;
+            }
+            // 对角线
+            else if (x == y || x == LED_MATRIX_WIDTH - 1 - y) {
+                color.green = 255;
+            }
+            // 中心十字
+            else if (x == LED_MATRIX_WIDTH / 2 || y == LED_MATRIX_HEIGHT / 2) {
+                color.blue = 255;
+            }
+
+            if (color.red || color.green || color.blue) {
+                led_matrix_set_pixel(x, y, color);
+            }
+        }
+    }
+
+    return led_matrix_refresh();
+}
+
+esp_err_t led_matrix_load_animation(const char *animation_name)
+{
+    if (!s_initialized || s_matrix_led_strip == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!animation_name) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Loading animation: %s", animation_name);
+
+    // 读取JSON文件
+    FILE *file = fopen("/sdcard/matrix.json", "r");
+    if (!file) {
+        ESP_LOGE(TAG, "Failed to open matrix.json file");
+        return ESP_FAIL;
+    }
+
+    // 获取文件大小
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    if (file_size <= 0 || file_size > 100000) { // 限制文件大小
+        ESP_LOGE(TAG, "Invalid file size: %ld", file_size);
+        fclose(file);
+        return ESP_FAIL;
+    }
+
+    // 读取文件内容
+    char *json_string = malloc(file_size + 1);
+    if (!json_string) {
+        ESP_LOGE(TAG, "Failed to allocate memory for JSON");
+        fclose(file);
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t read_size = fread(json_string, 1, file_size, file);
+    fclose(file);
+    json_string[read_size] = '\0';
+
+    // 解析JSON
+    cJSON *json = cJSON_Parse(json_string);
+    free(json_string);
+
+    if (!json) {
+        ESP_LOGE(TAG, "Failed to parse JSON");
+        return ESP_FAIL;
+    }
+
+    // 查找animations数组
+    cJSON *animations = cJSON_GetObjectItem(json, "animations");
+    if (!animations || !cJSON_IsArray(animations)) {
+        ESP_LOGE(TAG, "No animations array found");
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
+    // 查找指定的动画
+    cJSON *animation = NULL;
+    cJSON *anim_item = NULL;
+    cJSON_ArrayForEach(anim_item, animations) {
+        cJSON *name = cJSON_GetObjectItem(anim_item, "name");
+        if (name && cJSON_IsString(name) && 
+            strcmp(cJSON_GetStringValue(name), animation_name) == 0) {
+            animation = anim_item;
+            break;
+        }
+    }
+
+    if (!animation) {
+        ESP_LOGE(TAG, "Animation '%s' not found", animation_name);
+        cJSON_Delete(json);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // 获取points数组
+    cJSON *points = cJSON_GetObjectItem(animation, "points");
+    if (!points || !cJSON_IsArray(points)) {
+        ESP_LOGE(TAG, "No points array found in animation");
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
+    // 清空矩阵
+    led_matrix_clear();
+
+    // 绘制所有点
+    int point_count = 0;
+    cJSON *point = NULL;
+    cJSON_ArrayForEach(point, points) {
+        cJSON *x_json = cJSON_GetObjectItem(point, "x");
+        cJSON *y_json = cJSON_GetObjectItem(point, "y");
+        cJSON *r_json = cJSON_GetObjectItem(point, "r");
+        cJSON *g_json = cJSON_GetObjectItem(point, "g");
+        cJSON *b_json = cJSON_GetObjectItem(point, "b");
+
+        if (cJSON_IsNumber(x_json) && cJSON_IsNumber(y_json) &&
+            cJSON_IsNumber(r_json) && cJSON_IsNumber(g_json) && cJSON_IsNumber(b_json)) {
+            
+            int x = cJSON_GetNumberValue(x_json);
+            int y = cJSON_GetNumberValue(y_json);
+            int r = cJSON_GetNumberValue(r_json);
+            int g = cJSON_GetNumberValue(g_json);
+            int b = cJSON_GetNumberValue(b_json);
+
+            if (x >= 0 && x < LED_MATRIX_WIDTH && y >= 0 && y < LED_MATRIX_HEIGHT &&
+                r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+                
+                led_color_t color = {r, g, b};
+                led_matrix_set_pixel(x, y, color);
+                point_count++;
+            }
+        }
+    }
+
+    cJSON_Delete(json);
+
+    // 刷新显示
+    esp_err_t ret = led_matrix_refresh();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Animation '%s' loaded successfully (%d points)", animation_name, point_count);
+    }
+
+    return ret;
 }

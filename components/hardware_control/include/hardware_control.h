@@ -32,6 +32,12 @@ extern "C" {
 #define TOUCH_WS2812_PIN    45      // 触摸开关WS2812引脚
 #define TOUCH_WS2812_NUM    1       // 触摸开关WS2812数量
 
+// LED矩阵配置
+#define LED_MATRIX_PIN      9       // LED矩阵WS2812控制引脚
+#define LED_MATRIX_WIDTH    32      // LED矩阵宽度
+#define LED_MATRIX_HEIGHT   32      // LED矩阵高度
+#define LED_MATRIX_NUM      (LED_MATRIX_WIDTH * LED_MATRIX_HEIGHT)  // LED总数量
+
 // LED Strip RMT配置
 #define LED_RMT_CLK_FREQ    10000000  // 10MHz RMT时钟频率
 
@@ -287,6 +293,91 @@ led_color_t touch_led_get_color(void);
  * @return 当前LED亮度 (0-100%)
  */
 uint8_t touch_led_get_brightness(void);
+
+// ==================== LED矩阵控制接口 ====================
+
+/**
+ * @brief LED矩阵动画点结构
+ */
+typedef struct {
+    uint8_t x;      ///< X坐标 (0-31)
+    uint8_t y;      ///< Y坐标 (0-31)
+    uint8_t r;      ///< 红色分量 (0-255)
+    uint8_t g;      ///< 绿色分量 (0-255)
+    uint8_t b;      ///< 蓝色分量 (0-255)
+} led_matrix_point_t;
+
+/**
+ * @brief 初始化LED矩阵
+ * 
+ * @return
+ *     - ESP_OK: 初始化成功
+ *     - ESP_FAIL: 初始化失败
+ */
+esp_err_t led_matrix_init(void);
+
+/**
+ * @brief 设置LED矩阵单个像素颜色
+ * 
+ * @param x X坐标 (0-31)
+ * @param y Y坐标 (0-31)
+ * @param color LED颜色
+ * @return
+ *     - ESP_OK: 设置成功
+ *     - ESP_ERR_INVALID_ARG: 坐标无效
+ *     - ESP_ERR_INVALID_STATE: 矩阵未初始化
+ */
+esp_err_t led_matrix_set_pixel(uint8_t x, uint8_t y, led_color_t color);
+
+/**
+ * @brief 清空LED矩阵（全部关闭）
+ * 
+ * @return
+ *     - ESP_OK: 清空成功
+ *     - ESP_ERR_INVALID_STATE: 矩阵未初始化
+ */
+esp_err_t led_matrix_clear(void);
+
+/**
+ * @brief 刷新LED矩阵显示
+ * 
+ * @return
+ *     - ESP_OK: 刷新成功
+ *     - ESP_ERR_INVALID_STATE: 矩阵未初始化
+ */
+esp_err_t led_matrix_refresh(void);
+
+/**
+ * @brief 设置LED矩阵亮度
+ * 
+ * @param brightness 亮度 (0-100%)
+ * @return
+ *     - ESP_OK: 设置成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ *     - ESP_ERR_INVALID_STATE: 矩阵未初始化
+ */
+esp_err_t led_matrix_set_brightness(uint8_t brightness);
+
+/**
+ * @brief 从JSON文件加载并显示动画
+ * 
+ * @param animation_name 动画名称
+ * @return
+ *     - ESP_OK: 加载成功
+ *     - ESP_ERR_NOT_FOUND: 动画未找到
+ *     - ESP_ERR_INVALID_STATE: 矩阵未初始化
+ *     - ESP_FAIL: 文件读取失败
+ */
+esp_err_t led_matrix_load_animation(const char *animation_name);
+
+/**
+ * @brief 显示测试图案
+ * 
+ * @return
+ *     - ESP_OK: 显示成功
+ *     - ESP_ERR_INVALID_STATE: 矩阵未初始化
+ */
+esp_err_t led_matrix_test_pattern(void);
 
 // ==================== GPIO控制接口 ====================
 
