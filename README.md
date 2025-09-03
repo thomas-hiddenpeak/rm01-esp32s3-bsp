@@ -7,7 +7,7 @@
 
 ## 🚀 主要特性
 
-- **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、GPIO通用操作、USB MUX切换
+- **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、32x32 LED矩阵、GPIO通用操作、USB MUX切换
 - **🌐 网络功能**: W5500以太网接口、DHCP服务器、网关服务、网络配置管理
 - **💾 存储功能**: TF卡（MicroSD）文件系统支持，完整的文件管理操作
 - **⚡ 设备电源管理**: AGX和LPMU设备的电源控制和状态监控
@@ -28,9 +28,12 @@
 ### WS2812 LED控制
 - **板载LED**: GPIO 42，28颗LED阵列
 - **触摸LED**: GPIO 45，1颗状态指示LED
+- **LED矩阵**: GPIO 9，32x32 WS2812矩阵 (1024颗LED)
 - 支持RGB颜色控制 (0-255)
 - 支持亮度调节 (0-100%)
 - 内置彩虹渐变效果
+- LED矩阵支持从SD卡加载JSON动画文件
+- 配置持久化和开机自动启动
 
 ### GPIO通用控制
 - 支持任意GPIO引脚操作
@@ -149,6 +152,14 @@ idf.py -p [PORT] flash monitor
 - `tled <r> <g> <b>` - 设置触摸LED颜色 (RGB值: 0-255)
   - `tled bright <level>` - 设置触摸LED亮度 (0-100%)
   - `tled off` - 关闭触摸LED
+- `matrix <command>` - LED矩阵控制 (32x32 WS2812矩阵，GPIO 9)
+  - `matrix clear` - 清空LED矩阵
+  - `matrix test` - 显示测试图案（边框、对角线、十字）
+  - `matrix bright <level>` - 设置矩阵亮度 (0-100%)
+  - `matrix pixel <x> <y> <r> <g> <b>` - 设置单个像素颜色 (坐标: 0-31, RGB: 0-255)
+  - `matrix load <animation>` - 从SD卡加载动画 (如: `matrix load Logo`)
+  - `matrix config save` - 保存当前矩阵配置为启动默认
+  - `matrix config show` - 显示当前矩阵配置
 - `gpio <pin> high|low|input` - GPIO引脚控制和读取
   - `gpio <pin> high` - 设置GPIO引脚为高电平
   - `gpio <pin> low` - 设置GPIO引脚为低电平
@@ -175,6 +186,7 @@ idf.py -p [PORT] flash monitor
 - `test fan` - 执行风扇功能测试
 - `test bled` - 执行板载LED测试
 - `test tled` - 执行触摸LED测试
+- `test matrix` - 执行LED矩阵测试（显示测试图案）
 - `test gpio <pin>` - 安全测试GPIO输出功能
 - `test gpio_input <pin>` - 测试GPIO输入功能
 - `test orin` - 测试Orin电源控制功能
@@ -229,6 +241,26 @@ idf.py -p [PORT] flash monitor
 
 > 📖 **详细使用手册**: 请参考 `markdown/SDCARD_CONSOLE_COMMANDS.md` 获取完整的TF卡命令使用指南和示例
 
+#### LED矩阵控制快速入门
+
+LED矩阵是一个32x32的WS2812像素阵列，提供丰富的显示功能：
+
+```bash
+# 基本操作
+matrix test                     # 显示测试图案
+matrix bright 30                # 设置亮度30%
+matrix pixel 15 15 255 0 0      # 中心设置红色像素
+
+# 动画加载 (需要SD卡)
+matrix load Logo                # 加载Logo动画
+
+# 配置管理
+matrix config save              # 保存当前设置为启动默认
+matrix config show              # 显示当前配置
+```
+
+> 📖 **LED矩阵详细指南**: 请参考 `markdown/LED_MATRIX_USAGE_GUIDE.md` 获取完整的LED矩阵使用手册
+
 ## 📁 项目结构
 
 ```
@@ -252,6 +284,9 @@ idf.py -p [PORT] flash monitor
     ├── CONSOLE_GUIDE.md        控制台使用指南
     ├── USB_MUX_CONTROL_GUIDE.md USB MUX控制功能指南
     ├── SDCARD_CONSOLE_COMMANDS.md TF卡控制台命令完整参考
+    ├── LED_MATRIX_USAGE_GUIDE.md LED矩阵控制使用指南
+    ├── LED_MATRIX_IMPLEMENTATION.md LED矩阵功能实现说明
+    ├── LED_MATRIX_AUTO_STARTUP.md LED矩阵自动启动功能
     └── README_COMPONENTS.md    组件说明文档
 ```
 

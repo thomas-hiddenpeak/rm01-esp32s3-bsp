@@ -246,7 +246,7 @@ esp_err_t console_interface_register_device_commands(void)
         },
         {
             .command = "matrix",
-            .help = "LED矩阵控制: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>",
+            .help = "LED矩阵控制: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>|config [save|show]",
             .func = &cmd_matrix,
         },
         {
@@ -1847,6 +1847,16 @@ static int cmd_help(int argc, char **argv)
     printf("  tled <r> <g> <b>     - 设置触摸LED颜色 (0-255)\n");
     printf("  tled bright <0-100>  - 设置触摸LED亮度\n");
     printf("  tled off             - 关闭触摸LED\n");
+    printf("\nLED矩阵控制 (32x32 WS2812矩阵, GPIO 9):\n");
+    printf("  matrix clear          - 清空LED矩阵\n");
+    printf("  matrix test           - 显示测试图案 (边框/对角线/十字)\n");
+    printf("  matrix bright <0-100> - 设置矩阵亮度\n");
+    printf("  matrix pixel <x> <y> <r> <g> <b> - 设置单个像素颜色\n");
+    printf("    坐标范围: x,y = 0-31, 颜色范围: r,g,b = 0-255\n");
+    printf("  matrix load <animation> - 从SD卡加载动画 (如: matrix load Logo)\n");
+    printf("  matrix config save    - 保存当前配置为启动默认\n");
+    printf("  matrix config show    - 显示当前配置\n");
+    printf("    注意: 需要SD卡挂载且包含 /sdcard/matrix.json 文件\n");
     printf("\nGPIO控制:\n");
     printf("  gpio <pin> high      - 设置GPIO引脚为高电平\n");
     printf("  gpio <pin> low       - 设置GPIO引脚为低电平\n");
@@ -1870,6 +1880,7 @@ static int cmd_help(int argc, char **argv)
     printf("  test fan             - 测试风扇功能\n");
     printf("  test bled            - 测试板载LED\n");
     printf("  test tled            - 测试触摸LED\n");
+    printf("  test matrix          - 测试LED矩阵 (显示测试图案)\n");
     printf("  test gpio <pin>      - 安全测试GPIO输出功能\n");
     printf("  test gpio_input <pin> - 测试GPIO输入功能\n");
     printf("  test agx            - 测试AGX电源控制功能\n");
@@ -1927,10 +1938,12 @@ static int cmd_help(int argc, char **argv)
     printf("  • GPIO输入操作使用 'input' 参数以避免状态干扰\n");
     printf("  • LED RGB值范围: 0-255, 亮度范围: 0-100%%\n");
     printf("  • 风扇速度范围: 0-100%%, PWM频率: 25kHz\n");
+    printf("  • LED矩阵: 32x32像素, 支持亮度调节和动画加载\n");
     printf("  • 以太网默认配置: IP 10.10.99.97, DHCP池 10.10.99.101-110\n");
     printf("  • TF卡接口: SDMMC 4-bit, GPIO 4,5,6,7,15,16, 支持FAT32\n");
     printf("  ✅ 网络配置修改后自动保存到NVS\n");
     printf("  ⚙️  硬件配置修改后需要手动执行 'save' 命令保存，启动时自动加载\n");
+    printf("  🎨 LED矩阵配置可通过 'matrix config save' 保存，支持开机自动启动\n");
     printf("  📖 TF卡详细使用指南: markdown/SDCARD_CONSOLE_COMMANDS.md\n");
     printf("========================================\n");
     return 0;
@@ -2989,13 +3002,15 @@ static void console_task(void *pvParameters)
 static int cmd_matrix(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("用法: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>\n");
+        printf("用法: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>|config [save|show]\n");
         printf("示例:\n");
         printf("  matrix clear                    - 清空LED矩阵\n");
         printf("  matrix test                     - 显示测试图案\n");
         printf("  matrix bright 50                - 设置亮度为50%%\n");
         printf("  matrix pixel 10 15 255 0 0      - 在(10,15)位置显示红色像素\n");
         printf("  matrix load Logo                - 加载名为'Logo'的动画\n");
+        printf("  matrix config save              - 保存当前矩阵配置\n");
+        printf("  matrix config show              - 显示当前矩阵配置\n");
         return 1;
     }
     
@@ -3074,9 +3089,54 @@ static int cmd_matrix(int argc, char **argv)
             printf("加载动画失败，请检查SD卡和文件\n");
         }
     }
+    else if (strcmp(argv[1], "config") == 0) {
+        if (argc < 3) {
+            printf("用法: matrix config save|show\n");
+            return 1;
+        }
+        
+        if (strcmp(argv[2], "save") == 0) {
+            // 获取当前亮度
+            uint8_t current_brightness = led_matrix_get_brightness();
+            
+            // 保存当前配置 (这里假设用户想保存当前的设置)
+            ret = config_manager_set_matrix_config(current_brightness, "Logo", true, true);
+            if (ret == ESP_OK) {
+                ret = config_manager_save();
+                if (ret == ESP_OK) {
+                    printf("LED矩阵配置已保存 (亮度: %d%%, 动画: Logo, 自动启动: 开启)\n", current_brightness);
+                } else {
+                    printf("保存配置失败: %s\n", esp_err_to_name(ret));
+                }
+            } else {
+                printf("设置矩阵配置失败: %s\n", esp_err_to_name(ret));
+            }
+        }
+        else if (strcmp(argv[2], "show") == 0) {
+            uint8_t brightness;
+            char animation_name[64];
+            bool auto_start, enable;
+            
+            ret = config_manager_get_matrix_config(&brightness, animation_name, &auto_start, &enable);
+            if (ret == ESP_OK) {
+                printf("LED矩阵配置:\n");
+                printf("  亮度: %d%%\n", brightness);
+                printf("  启动动画: %s\n", animation_name);
+                printf("  自动启动: %s\n", auto_start ? "开启" : "关闭");
+                printf("  启用状态: %s\n", enable ? "启用" : "禁用");
+            } else {
+                printf("获取矩阵配置失败: %s\n", esp_err_to_name(ret));
+            }
+        }
+        else {
+            printf("未知config命令: %s\n", argv[2]);
+            printf("用法: matrix config save|show\n");
+            return 1;
+        }
+    }
     else {
         printf("未知命令: %s\n", argv[1]);
-        printf("用法: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>\n");
+        printf("用法: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>|config [save|show]\n");
         return 1;
     }
     

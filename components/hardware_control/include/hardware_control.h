@@ -359,6 +359,13 @@ esp_err_t led_matrix_refresh(void);
 esp_err_t led_matrix_set_brightness(uint8_t brightness);
 
 /**
+ * @brief 获取LED矩阵当前亮度
+ * 
+ * @return 当前LED矩阵亮度 (0-100%)
+ */
+uint8_t led_matrix_get_brightness(void);
+
+/**
  * @brief 从JSON文件加载并显示动画
  * 
  * @param animation_name 动画名称

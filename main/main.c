@@ -18,6 +18,7 @@
 #include "ethernet_interface.h"
 #include "config_manager.h"
 #include "hardware_config.h"
+#include "hardware_control.h"
 #include "console_ping.h"
 #include "sdcard_interface.h"
 #include "web_server.h"
@@ -155,10 +156,53 @@ void app_main(void)
     ret = sdcard_auto_mount(NULL);  // 使用默认挂载点 /sdcard
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "SD卡自动挂载成功");
+        
+        // SD卡挂载成功后，检查并启动LED矩阵
+        ESP_LOGI(TAG, "检查LED矩阵自动启动配置...");
+        uint8_t matrix_brightness;
+        char animation_name[64];
+        bool auto_start, enable;
+        
+        ret = config_manager_get_matrix_config(&matrix_brightness, animation_name, &auto_start, &enable);
+        if (ret == ESP_OK && enable && auto_start) {
+            ESP_LOGI(TAG, "配置为自动启动LED矩阵: 亮度=%d%%, 动画='%s'", matrix_brightness, animation_name);
+            
+            // 初始化LED矩阵
+            ret = led_matrix_init();
+            if (ret == ESP_OK) {
+                // 设置亮度
+                ret = led_matrix_set_brightness(matrix_brightness);
+                if (ret == ESP_OK) {
+                    // 加载启动动画
+                    ret = led_matrix_load_animation(animation_name);
+                    if (ret == ESP_OK) {
+                        ESP_LOGI(TAG, "LED矩阵自动启动成功");
+                    } else if (ret == ESP_ERR_NOT_FOUND) {
+                        ESP_LOGW(TAG, "启动动画 '%s' 未找到，显示测试图案", animation_name);
+                        led_matrix_test_pattern();
+                    } else {
+                        ESP_LOGW(TAG, "加载启动动画失败: %s，显示测试图案", esp_err_to_name(ret));
+                        led_matrix_test_pattern();
+                    }
+                } else {
+                    ESP_LOGW(TAG, "设置LED矩阵亮度失败: %s", esp_err_to_name(ret));
+                }
+            } else {
+                ESP_LOGW(TAG, "LED矩阵初始化失败: %s", esp_err_to_name(ret));
+            }
+        } else if (ret == ESP_OK && enable && !auto_start) {
+            ESP_LOGI(TAG, "LED矩阵已启用但未配置为自动启动");
+        } else if (ret == ESP_OK && !enable) {
+            ESP_LOGI(TAG, "LED矩阵未启用");
+        } else {
+            ESP_LOGW(TAG, "获取LED矩阵配置失败: %s", esp_err_to_name(ret));
+        }
     } else if (ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGD(TAG, "未检测到SD卡，跳过挂载");
+        ESP_LOGI(TAG, "未检测到SD卡，LED矩阵自动启动已跳过");
     } else {
         ESP_LOGW(TAG, "SD卡自动挂载失败: %s", esp_err_to_name(ret));
+        ESP_LOGI(TAG, "SD卡挂载失败，LED矩阵自动启动已跳过");
     }
 
     // 12. 注册所有控制台命令

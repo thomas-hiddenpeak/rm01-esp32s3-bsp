@@ -495,6 +495,64 @@ esp_err_t config_manager_set_led_defaults(uint8_t brightness,
     return ESP_OK;
 }
 
+esp_err_t config_manager_set_matrix_config(uint8_t brightness, 
+                                           const char *animation_name,
+                                           bool auto_start,
+                                           bool enable)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (brightness > 100) {
+        ESP_LOGE(TAG, "Invalid matrix brightness (must be 0-100)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!animation_name) {
+        ESP_LOGE(TAG, "Animation name cannot be NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.led.matrix_brightness = brightness;
+    s_current_config.led.matrix_auto_start = auto_start;
+    s_current_config.led.matrix_enable = enable;
+    
+    // 安全复制动画名称
+    strncpy(s_current_config.led.matrix_startup_animation, animation_name, 
+            sizeof(s_current_config.led.matrix_startup_animation) - 1);
+    s_current_config.led.matrix_startup_animation[sizeof(s_current_config.led.matrix_startup_animation) - 1] = '\0';
+    
+    s_current_config.checksum = calculate_config_checksum(&s_current_config);
+    
+    ESP_LOGI(TAG, "Matrix config updated: brightness=%d%%, animation='%s', auto_start=%s, enable=%s",
+             brightness, animation_name, auto_start ? "true" : "false", enable ? "true" : "false");
+    return ESP_OK;
+}
+
+esp_err_t config_manager_get_matrix_config(uint8_t *brightness,
+                                           char *animation_name,
+                                           bool *auto_start,
+                                           bool *enable)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!brightness || !animation_name || !auto_start || !enable) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *brightness = s_current_config.led.matrix_brightness;
+    *auto_start = s_current_config.led.matrix_auto_start;
+    *enable = s_current_config.led.matrix_enable;
+    
+    strncpy(animation_name, s_current_config.led.matrix_startup_animation, 63);
+    animation_name[63] = '\0';
+    
+    return ESP_OK;
+}
+
 esp_err_t config_manager_set_usb_mux_target(uint8_t target)
 {
     if (!s_initialized) {

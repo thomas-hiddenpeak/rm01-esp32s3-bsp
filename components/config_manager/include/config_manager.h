@@ -49,6 +49,12 @@ typedef struct {
     led_color_t touch_led_color; ///< Default touch LED color
     bool effect_enable;                 ///< Enable LED effects
     uint16_t rainbow_speed_ms;          ///< Rainbow effect speed in milliseconds
+    
+    // LED矩阵配置
+    bool matrix_auto_start;             ///< Auto start matrix display on boot
+    uint8_t matrix_brightness;          ///< Matrix default brightness (0-100)
+    char matrix_startup_animation[64];  ///< Startup animation name
+    bool matrix_enable;                 ///< Enable matrix display
 } led_config_t;
 
 /**
@@ -140,7 +146,11 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
     .board_led_color = {0, 0, 255}, \
     .touch_led_color = {0, 255, 0}, \
     .effect_enable = false, \
-    .rainbow_speed_ms = 100 \
+    .rainbow_speed_ms = 100, \
+    .matrix_auto_start = true, \
+    .matrix_brightness = 30, \
+    .matrix_startup_animation = "Logo", \
+    .matrix_enable = true \
 }
 
 /**
@@ -405,6 +415,34 @@ esp_err_t config_manager_set_fan_speed(uint8_t speed_on, uint8_t speed_off);
 esp_err_t config_manager_set_led_defaults(uint8_t brightness, 
                                           led_color_t board_color,
                                           led_color_t touch_color);
+
+/**
+ * @brief Set LED matrix configuration
+ * 
+ * @param brightness Matrix brightness (0-100)
+ * @param animation_name Startup animation name
+ * @param auto_start Auto start on boot
+ * @param enable Enable matrix display
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_matrix_config(uint8_t brightness, 
+                                           const char *animation_name,
+                                           bool auto_start,
+                                           bool enable);
+
+/**
+ * @brief Get LED matrix configuration from current LED config
+ * 
+ * @param brightness Output matrix brightness
+ * @param animation_name Output animation name buffer (min 64 bytes)
+ * @param auto_start Output auto start setting
+ * @param enable Output enable setting
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_get_matrix_config(uint8_t *brightness,
+                                           char *animation_name,
+                                           bool *auto_start,
+                                           bool *enable);
 
 /**
  * @brief Set USB MUX default target

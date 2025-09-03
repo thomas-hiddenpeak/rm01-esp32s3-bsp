@@ -1582,6 +1582,11 @@ esp_err_t led_matrix_set_brightness(uint8_t brightness)
     return led_matrix_apply_buffer();
 }
 
+uint8_t led_matrix_get_brightness(void)
+{
+    return s_matrix_brightness;
+}
+
 esp_err_t led_matrix_test_pattern(void)
 {
     if (!s_initialized || s_matrix_led_strip == NULL) {
