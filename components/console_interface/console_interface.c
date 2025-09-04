@@ -1939,7 +1939,7 @@ static int cmd_help(int argc, char **argv)
     printf("  • LED RGB值范围: 0-255, 亮度范围: 0-100%%\n");
     printf("  • 风扇速度范围: 0-100%%, PWM频率: 25kHz\n");
     printf("  • LED矩阵: 32x32像素, 支持亮度调节和动画加载\n");
-    printf("  • 以太网默认配置: IP 10.10.99.97, DHCP池 10.10.99.101-110\n");
+    printf("  • 以太网默认配置: IP 10.10.99.97, DHCP池 10.10.99.100-110\n");
     printf("  • TF卡接口: SDMMC 4-bit, GPIO 4,5,6,7,15,16, 支持FAT32\n");
     printf("  ✅ 网络配置修改后自动保存到NVS\n");
     printf("  ⚙️  硬件配置修改后需要手动执行 'save' 命令保存，启动时自动加载\n");
@@ -2552,7 +2552,7 @@ static int cmd_config(int argc, char **argv)
         printf("  config set fan 70 0 true     - 设置风扇开启70%%，关闭0%%，启用自动控制\n");
         printf("  config set led 80 0 0 255 0 255 0  - 设置LED亮度80%%，板载蓝色，触摸绿色\n");
         printf("  config set eth 10.10.99.98 10.10.99.1 255.255.255.0 8.8.8.8\n");
-        printf("  config set dhcp true 10.10.99.101 10.10.99.110 24\n");
+        printf("  config set dhcp true 10.10.99.100 10.10.99.110 24\n");
         printf("  config set gateway true true false\n");
         printf("  config set web /sdcard/web 80 true  - 设置Web服务文档根目录、端口、自动启动\n");
         return 1;
@@ -2804,7 +2804,7 @@ static int cmd_defaults(int argc, char **argv)
         
         printf("\n[DHCP服务器默认参数]\n");
         printf("  启用: 是\n");
-        printf("  起始IP: 10.10.99.101\n");
+        printf("  起始IP: 10.10.99.100\n");
         printf("  结束IP: 10.10.99.110\n");
         printf("  租约时间: 24小时\n");
         printf("  最大客户端: 8\n");
@@ -2879,8 +2879,8 @@ static int cmd_defaults(int argc, char **argv)
         }
         
     } else if (strcmp(argv[1], "dhcp") == 0) {
-        printf("应用DHCP默认参数: 启用, 池范围10.10.99.101-110\n");
-        esp_err_t ret = config_manager_set_dhcp_params(true, "10.10.99.101", "10.10.99.110", 24);
+        printf("应用DHCP默认参数: 启用, 池范围10.10.99.100-110\n");
+        esp_err_t ret = config_manager_set_dhcp_params(true, "10.10.99.100", "10.10.99.110", 24);
         if (ret != ESP_OK) {
             printf("设置DHCP默认参数失败: %s\n", esp_err_to_name(ret));
             return 1;

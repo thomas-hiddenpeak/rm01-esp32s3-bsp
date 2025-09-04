@@ -164,7 +164,7 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
  */
 #define DEFAULT_DHCP_CONFIG() { \
     .enable = true, \
-    .start_ip = "10.10.99.101", \
+    .start_ip = "10.10.99.100", \
     .end_ip = "10.10.99.110", \
     .lease_time_hours = 24, \
     .max_clients = 8, \

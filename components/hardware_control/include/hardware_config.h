@@ -55,7 +55,7 @@
 // DHCP服务器默认配置
 #define DEFAULT_DHCP_ENABLE         true             // 默认启用DHCP服务器
 #define DEFAULT_DHCP_START_IP       "10.10.99.100"   // 默认DHCP起始IP
-#define DEFAULT_DHCP_END_IP         "10.10.99.101"   // 默认DHCP结束IP
+#define DEFAULT_DHCP_END_IP         "10.10.99.110"   // 默认DHCP结束IP
 #define DEFAULT_DHCP_LEASE_TIME     24               // 默认租约时间(小时)
 #define DEFAULT_DHCP_MAX_CLIENTS    8                // 默认最大客户端数
 

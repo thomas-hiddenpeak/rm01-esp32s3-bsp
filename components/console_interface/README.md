@@ -178,7 +178,7 @@ printf("已执行 %lu 条命令，运行 %llu ms\n", commands_executed, uptime_m
 
 ```bash
 # 网络配置 - 自动保存
-config set dhcp true 10.10.99.101 10.10.99.110 24
+config set dhcp true 10.10.99.100 10.10.99.110 24
 # 输出: ✅ DHCP配置已自动保存到NVS
 
 # 硬件配置 - 需手动保存
