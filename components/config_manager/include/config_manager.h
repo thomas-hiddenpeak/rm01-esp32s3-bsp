@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "ethernet_interface.h"  // 使用ethernet_interface中定义的ethernet_config_t
+#include "ethernet_interface.h"  // 使用ethernet_interface中定义的ethernet_config_t和DHCP相关类型
 #include "hardware_control.h"    // 使用hardware_control中定义的led_color_t
 
 #ifdef __cplusplus
@@ -105,6 +105,7 @@ typedef struct {
     led_config_t led;           ///< LED configuration
     ethernet_config_t ethernet; ///< Ethernet configuration
     dhcp_config_t dhcp;         ///< DHCP server configuration
+    dhcp_reservation_config_t dhcp_reservations; ///< DHCP IP reservations configuration
     gateway_config_t gateway;   ///< Gateway service configuration
     usb_mux_config_t usb_mux;   ///< USB MUX configuration
     web_server_config_t web;    ///< Web server configuration
@@ -172,6 +173,14 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
 }
 
 /**
+ * @brief Default DHCP reservations configuration
+ */
+#define DEFAULT_DHCP_RESERVATIONS_CONFIG() {{ \
+    .reservations = {{0}}, \
+    .reservation_count = 0 \
+}}
+
+/**
  * @brief Default gateway configuration
  */
 #define DEFAULT_GATEWAY_CONFIG() { \
@@ -218,6 +227,7 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
     .led = DEFAULT_LED_CONFIG(), \
     .ethernet = DEFAULT_ETHERNET_CONFIG(), \
     .dhcp = DEFAULT_DHCP_CONFIG(), \
+    .dhcp_reservations = DEFAULT_DHCP_RESERVATIONS_CONFIG(), \
     .gateway = DEFAULT_GATEWAY_CONFIG(), \
     .usb_mux = DEFAULT_USB_MUX_CONFIG(), \
     .web = DEFAULT_WEB_SERVER_CONFIG(), \
@@ -368,6 +378,21 @@ esp_err_t config_manager_set_ethernet_config(const ethernet_config_t *config);
  * @return esp_err_t ESP_OK on success, error code otherwise
  */
 esp_err_t config_manager_set_dhcp_config(const dhcp_config_t *config);
+
+/**
+ * @brief Get DHCP reservations configuration
+ * 
+ * @return const dhcp_reservations_config_t* Pointer to DHCP reservations configuration
+ */
+const dhcp_reservation_config_t* config_manager_get_dhcp_reservations_config(void);
+
+/**
+ * @brief Set DHCP reservations configuration
+ * 
+ * @param config DHCP reservations configuration structure
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_dhcp_reservations_config(const dhcp_reservation_config_t *config);
 
 /**
  * @brief Set gateway configuration

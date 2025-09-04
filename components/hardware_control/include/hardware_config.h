@@ -48,7 +48,7 @@
 
 // 以太网默认配置
 #define DEFAULT_ETH_IP_ADDR         "10.10.99.97"    // 默认IP地址
-#define DEFAULT_ETH_GATEWAY         "10.10.99.97"    // 默认网关地址
+#define DEFAULT_ETH_GATEWAY         "10.10.99.100"    // 默认网关地址
 #define DEFAULT_ETH_NETMASK         "255.255.255.0"  // 默认子网掩码
 #define DEFAULT_ETH_DNS_SERVER      "8.8.8.8"        // 默认DNS服务器
 

@@ -131,6 +131,8 @@ idf.py -p [PORT] flash monitor
 
 系统启动后，可通过UART控制台（115200波特率）使用以下命令：
 
+> 📊 **命令总计**: 系统提供70+个交互命令，涵盖硬件控制、网络管理、存储操作和系统监控等功能
+
 #### 系统命令
 - `help` - 显示所有可用命令的详细帮助信息
 - `info` - 显示系统详细信息
@@ -217,15 +219,31 @@ idf.py -p [PORT] flash monitor
 
 #### DHCP服务器控制命令
 - `eth_dhcp` - 显示DHCP服务器状态和客户端列表
-  - `eth_dhcp status` - 显示DHCP服务器状态
-  - `eth_dhcp start` - 启动DHCP服务器
-  - `eth_dhcp stop` - 停止DHCP服务器
-  - `eth_dhcp restart` - 重启DHCP服务器
+  - `eth_dhcp status` - 显示DHCP服务器详细状态
+  - `eth_dhcp enable` - 启动DHCP服务器
+  - `eth_dhcp disable` - 停止DHCP服务器
+  - `eth_dhcp reload` - 从NVS重新载入配置
+  - `eth_dhcp list` - 显示当前活跃的DHCP客户端列表
+  - `eth_dhcp reservations` - 显示所有IP-MAC地址绑定预留
+
+#### DHCP IP-MAC绑定管理命令
+- `eth_dhcp reserve <mac_addr> <ip_addr> [description]` - 添加IP-MAC地址绑定
+  - 示例: `eth_dhcp reserve aa:bb:cc:dd:ee:ff 10.10.99.100 "主控设备"`
+  - 示例: `eth_dhcp reserve 02:42:ac:11:00:02 10.10.99.101 "Docker容器"`
+- `eth_dhcp unreserve <mac_addr>` - 删除指定MAC地址的IP预留
+  - 示例: `eth_dhcp unreserve aa:bb:cc:dd:ee:ff`
+- `eth_dhcp clear reservations` - 清除所有IP-MAC地址绑定（需要确认）
+- `eth_dhcp pool <start_ip> <end_ip> [lease_hours]` - 配置DHCP地址池
+  - 示例: `eth_dhcp pool 10.10.99.100 10.10.99.105 12`
+- `eth_dhcp release <mac_addr>` - 释放指定MAC地址的DHCP租约
+  - 示例: `eth_dhcp release aa:bb:cc:dd:ee:ff`
 
 #### 网关服务控制命令
-- `eth_gateway status` - 显示网关服务状态
-- `eth_gateway start` - 启动网关服务
-- `eth_gateway stop` - 停止网关服务
+- `eth_gateway` - 显示网关服务状态
+- `eth_gateway enable` - 启动网关服务
+- `eth_gateway disable` - 停止网关服务
+
+> 📖 **详细文档**: 完整的DHCP命令使用指南请参考 [DHCP命令指南](markdown/DHCP_COMMAND_GUIDE.md)
 
 #### TF卡存储控制命令（13个命令）
 
@@ -322,6 +340,7 @@ agx diagnose                    # 诊断AGX连接问题，提供详细网络状�
 └── markdown/                   项目文档
     ├── PROJECT_SUMMARY.md      项目总结
     ├── CONSOLE_GUIDE.md        控制台使用指南
+    ├── DHCP_COMMAND_GUIDE.md   DHCP命令完整使用指南
     ├── USB_MUX_CONTROL_GUIDE.md USB MUX控制功能指南
     ├── SDCARD_CONSOLE_COMMANDS.md TF卡控制台命令完整参考
     ├── LED_MATRIX_USAGE_GUIDE.md LED矩阵控制使用指南

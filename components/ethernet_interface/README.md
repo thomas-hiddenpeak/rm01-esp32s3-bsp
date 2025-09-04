@@ -51,9 +51,29 @@ eth_dhcp pool <start_ip> <end_ip>
 # 设置DHCP地址池和租约时间
 eth_dhcp pool <start_ip> <end_ip> <lease_hours>
 # 示例: eth_dhcp pool 10.10.99.100 10.10.99.105 12
+
+# 释放DHCP租约
+eth_dhcp release <mac_addr>
+# 示例: eth_dhcp release aa:bb:cc:dd:ee:ff
 ```
 
-### 3. 网关服务控制
+### 3. DHCP IP地址保留 (MAC-IP绑定)
+
+```bash
+# 查看所有IP保留
+eth_dhcp reservations
+
+# 添加IP保留 (MAC地址绑定固定IP)
+eth_dhcp reserve <mac_addr> <ip_addr> [description]
+# 示例: eth_dhcp reserve aa:bb:cc:dd:ee:ff 10.10.99.100 "主控设备"
+# 示例: eth_dhcp reserve 02:42:ac:11:00:02 10.10.99.101 "Docker容器"
+
+# 删除IP保留
+eth_dhcp unreserve <mac_addr>
+# 示例: eth_dhcp unreserve aa:bb:cc:dd:ee:ff
+```
+
+### 4. 网关服务控制
 
 ```bash
 # 查看网关状态
@@ -64,14 +84,14 @@ eth_gateway enable   # ESP32S3作为网关
 eth_gateway disable
 ```
 
-### 4. 状态查看
+### 5. 状态查看
 
 ```bash
 # 查看完整的以太网状态
 eth_status
 ```
 
-### 5. Ping测试
+### 6. Ping测试
 
 ```bash
 # 基本ping测试 (默认4次，1000ms超时)
@@ -87,7 +107,7 @@ eth_ping <target_ip> <count> <timeout_ms>
 # 示例: eth_ping 8.8.8.8 5 2000
 ```
 
-### 6. 重置接口
+### 7. 重置接口
 
 ```bash
 # 重置以太网接口
@@ -105,6 +125,9 @@ eth_reset
 - 可配置IP地址池范围
 - 可调整租约时间
 - 支持动态启用/禁用
+- **IP地址保留** - 支持MAC地址与IP地址绑定
+- **静态分配** - 特定设备总是获得相同IP地址
+- **配置持久化** - 保留配置自动保存到NVS
 
 ### 网关服务
 - 启用后ESP32S3充当网关角色
@@ -149,6 +172,14 @@ ethernet_set_dhcp_server(true);
 
 // 启用网关服务
 ethernet_set_gateway(true);
+
+// 添加DHCP IP保留 (MAC地址绑定)
+uint8_t mac_addr[6] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+ethernet_add_dhcp_reservation(mac_addr, "10.10.99.100", "主控设备");
+
+// 查看所有保留配置
+dhcp_reservation_config_t reservations;
+ethernet_get_dhcp_reservations(&reservations);
 ```
 
 ## 注意事项
@@ -158,6 +189,9 @@ ethernet_set_gateway(true);
 3. **电源**: W5500需要3.3V供电，确保电源稳定
 4. **网线**: 需要连接以太网线才能正常工作
 5. **IP冲突**: 避免IP地址与网络中其他设备冲突
+6. **IP保留**: 保留的IP地址必须在DHCP地址池范围内
+7. **MAC地址**: 确保MAC地址格式正确（xx:xx:xx:xx:xx:xx）
+8. **保留限制**: 最多支持10个IP地址保留
 
 ## 故障排除
 
@@ -171,6 +205,12 @@ ethernet_set_gateway(true);
 1. 确认以太网接口已获取IP地址
 2. 检查DHCP地址池配置
 3. 确认没有IP地址冲突
+
+### IP保留无法工作
+1. 确认MAC地址格式正确（使用 `eth_dhcp reservations` 查看）
+2. 检查保留的IP是否在DHCP地址池范围内
+3. 确认保留配置已启用
+4. 重启DHCP服务器生效：`eth_dhcp disable` 然后 `eth_dhcp enable`
 
 ### Ping测试失败
 1. 确认网络连接正常

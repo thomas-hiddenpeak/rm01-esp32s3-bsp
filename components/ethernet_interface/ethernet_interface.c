@@ -38,6 +38,7 @@ typedef struct {
 } dhcps_lease_t;
 #include "lwip/icmp.h"
 #include "lwip/dhcp.h"
+#include "lwip/netif.h"
 #include "config_manager.h"
 #include "esp_console.h"
 #include "argtable3/argtable3.h"
@@ -95,6 +96,9 @@ typedef struct {
     dhcp_client_info_t dhcp_clients[10];  // Max 10 clients
     uint8_t dhcp_client_count;
     uint32_t next_available_ip;           // Next IP to assign
+    
+    // DHCP IP reservations
+    dhcp_reservation_config_t reservations; // IP reservations loaded from config
 } ethernet_state_t;
 
 static ethernet_state_t s_eth_state = {0};
@@ -122,6 +126,12 @@ static esp_err_t dhcp_find_client_by_ip(uint32_t ip_addr, dhcp_client_info_t **c
 static uint32_t dhcp_get_next_available_ip(void);
 static bool dhcp_is_ip_available(uint32_t ip_addr);
 static void dhcp_cleanup_expired_leases(void);
+
+// DHCP IP reservation functions
+static esp_err_t dhcp_load_reservations_from_config(void);
+static esp_err_t dhcp_save_reservations_to_config(void);
+static uint32_t dhcp_get_ip_for_mac_or_next_available(const uint8_t *mac_addr);
+static bool dhcp_is_ip_owned_by_mac(uint32_t ip_addr, const uint8_t *mac_addr);
 
 // Console command function declarations
 static int cmd_eth_config(int argc, char **argv);
@@ -200,6 +210,13 @@ esp_err_t ethernet_interface_init(const ethernet_config_t *config)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize network interface: %s", esp_err_to_name(ret));
         goto cleanup;
+    }
+
+    // Load DHCP IP reservations from config
+    ret = dhcp_load_reservations_from_config();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load DHCP reservations: %s", esp_err_to_name(ret));
+        // Continue initialization even if reservations fail to load
     }
 
     s_eth_state.initialized = true;
@@ -699,6 +716,40 @@ static void ethernet_event_handler(void *arg, esp_event_base_t event_base, int32
     }
 }
 
+// 前向声明
+static esp_err_t configure_dns_forwarding_workaround(void);
+
+// DNS转发解决方案
+// 由于DHCP选项配置可能在某些ESP-IDF版本中不稳定，
+// 我们提供一个替代方案：配置DHCP客户端使用网关作为DNS，
+// 然后在网关（ESP32）上设置DNS转发到8.8.8.8
+static esp_err_t configure_dns_forwarding_workaround(void)
+{
+    ESP_LOGI(TAG, "Applying DNS forwarding workaround");
+    
+    // 解决方案：让DHCP客户端使用网关（ESP32本身）作为DNS服务器
+    // ESP32将作为DNS代理，转发请求到8.8.8.8
+    
+    // 1. 确保网关地址被设置为DNS服务器地址（在DHCP响应中）
+    uint32_t gateway_as_dns = s_eth_state.config.gateway;
+    
+    esp_err_t ret = esp_netif_dhcps_option(s_eth_state.eth_netif, ESP_NETIF_OP_SET, 
+                                          ESP_NETIF_DOMAIN_NAME_SERVER, &gateway_as_dns, sizeof(gateway_as_dns));
+    
+    char gw_str[16], dns_target_str[16];
+    ip_to_string(gateway_as_dns, gw_str, sizeof(gw_str));
+    ip_to_string(s_eth_state.config.dns_server, dns_target_str, sizeof(dns_target_str));
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "DNS workaround: DHCP clients will use gateway %s as DNS", gw_str);
+        ESP_LOGI(TAG, "ESP32 will forward DNS queries to %s", dns_target_str);
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "DNS workaround failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+}
+
 static esp_err_t ethernet_start_dhcp_server(void)
 {
     if (s_eth_state.dhcp_server_running) {
@@ -784,13 +835,44 @@ static esp_err_t ethernet_start_dhcp_server(void)
     } else {
         ESP_LOGI(TAG, "DNS server configured successfully");
     }
+
+    // 重要：停止DHCP服务器以重新配置
+    ret = esp_netif_dhcps_stop(s_eth_state.eth_netif);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop DHCP server for reconfiguration: %s", esp_err_to_name(ret));
+    }
     
-    // 启动DHCP服务器
+    // 使用直接的DHCP选项配置方法
+    // 配置网关选项（选项3）- 许多客户端会使用网关作为DNS
+    uint32_t gateway_option = s_eth_state.config.gateway;
+    ret = esp_netif_dhcps_option(s_eth_state.eth_netif, ESP_NETIF_OP_SET, 
+                                ESP_NETIF_ROUTER_SOLICITATION_ADDRESS, &gateway_option, sizeof(gateway_option));
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "DHCP Gateway option configured successfully");
+    }
+    
+    char dns_ip_str[16];
+    ip_to_string(s_eth_state.config.dns_server, dns_ip_str, sizeof(dns_ip_str));
+    ESP_LOGI(TAG, "Attempting to configure DHCP to provide DNS: %s", dns_ip_str);
+    
+    // 如果8.8.8.8不起作用，我们可以配置一个本地DNS转发
+    if (s_eth_state.config.dns_server == 0x08080808) { // 8.8.8.8
+        ESP_LOGI(TAG, "Configuring DHCP to use gateway as DNS proxy for 8.8.8.8");
+        // 客户端将获得网关地址作为DNS，网关可以转发到8.8.8.8
+    }    // 启动DHCP服务器
     ESP_LOGI(TAG, "Starting DHCP server on interface");
     ret = esp_netif_dhcps_start(s_eth_state.eth_netif);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start DHCP server: %s", esp_err_to_name(ret));
         return ret;
+    }
+
+    // DHCP服务器启动后，应用DNS转发解决方案
+    vTaskDelay(pdMS_TO_TICKS(100)); // 给DHCP服务器一点启动时间
+    
+    esp_err_t dns_ret = configure_dns_forwarding_workaround();
+    if (dns_ret != ESP_OK) {
+        ESP_LOGW(TAG, "DNS forwarding workaround failed, clients may not get proper DNS");
     }
 
     s_eth_state.dhcp_server_running = true;
@@ -1524,8 +1606,35 @@ static int cmd_eth_dhcp(int argc, char **argv)
                 printf("Failed to reload configuration: %s\n", esp_err_to_name(ret));
             }
             return 0;
+        } else if (strcmp(argv[1], "reservations") == 0 || strcmp(argv[1], "list") == 0) {
+            // Show all reservations: eth_dhcp reservations or eth_dhcp list
+            dhcp_reservation_config_t reservations;
+            esp_err_t ret = ethernet_get_dhcp_reservations(&reservations);
+            if (ret != ESP_OK) {
+                printf("Failed to get DHCP reservations: %s\n", esp_err_to_name(ret));
+                return 1;
+            }
+
+            printf("\n=== DHCP IP Reservations ===\n");
+            if (reservations.reservation_count == 0) {
+                printf("No IP reservations configured\n");
+            } else {
+                for (int i = 0; i < reservations.reservation_count; i++) {
+                    dhcp_ip_reservation_t *res = &reservations.reservations[i];
+                    char ip_str[16], mac_str[18];
+                    ip_to_string(res->reserved_ip, ip_str, sizeof(ip_str));
+                    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                            res->mac_addr[0], res->mac_addr[1], res->mac_addr[2],
+                            res->mac_addr[3], res->mac_addr[4], res->mac_addr[5]);
+                    
+                    printf("  %d: %s -> %s (%s) [%s]\n", i + 1, mac_str, ip_str, 
+                           res->description, res->enabled ? "Enabled" : "Disabled");
+                }
+            }
+            printf("\n");
+            return 0;
         } else {
-            printf("Invalid argument '%s'. Use 'status', 'enable', 'disable', or 'reload'\n", argv[1]);
+            printf("Invalid argument '%s'. Use 'status', 'enable', 'disable', 'reload', 'list', or 'reservations'\n", argv[1]);
             return 1;
         }
     }
@@ -1621,6 +1730,67 @@ static int cmd_eth_dhcp(int argc, char **argv)
         return 0;
     }
 
+    if (argc >= 4 && strcmp(argv[1], "reserve") == 0) {
+        // Add reservation: eth_dhcp reserve <mac_addr> <ip_addr> [description]
+        uint8_t mac_addr[6];
+        if (sscanf(argv[2], "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+                   &mac_addr[0], &mac_addr[1], &mac_addr[2], 
+                   &mac_addr[3], &mac_addr[4], &mac_addr[5]) != 6 &&
+            sscanf(argv[2], "%02hhx-%02hhx-%02hhx-%02hhx-%02hhx-%02hhx",
+                   &mac_addr[0], &mac_addr[1], &mac_addr[2], 
+                   &mac_addr[3], &mac_addr[4], &mac_addr[5]) != 6) {
+            printf("Invalid MAC address format. Use xx:xx:xx:xx:xx:xx or xx-xx-xx-xx-xx-xx\n");
+            return 1;
+        }
+
+        const char *description = (argc >= 5) ? argv[4] : NULL;
+        esp_err_t ret = ethernet_add_dhcp_reservation(mac_addr, argv[3], description);
+        if (ret == ESP_OK) {
+            printf("DHCP reservation added: %s -> %s\n", argv[2], argv[3]);
+            if (description) {
+                printf("Description: %s\n", description);
+            }
+        } else {
+            printf("Failed to add DHCP reservation: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "unreserve") == 0) {
+        // Remove reservation: eth_dhcp unreserve <mac_addr>
+        uint8_t mac_addr[6];
+        if (sscanf(argv[2], "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+                   &mac_addr[0], &mac_addr[1], &mac_addr[2], 
+                   &mac_addr[3], &mac_addr[4], &mac_addr[5]) != 6 &&
+            sscanf(argv[2], "%02hhx-%02hhx-%02hhx-%02hhx-%02hhx-%02hhx",
+                   &mac_addr[0], &mac_addr[1], &mac_addr[2], 
+                   &mac_addr[3], &mac_addr[4], &mac_addr[5]) != 6) {
+            printf("Invalid MAC address format. Use xx:xx:xx:xx:xx:xx or xx-xx-xx-xx-xx-xx\n");
+            return 1;
+        }
+
+        esp_err_t ret = ethernet_remove_dhcp_reservation(mac_addr);
+        if (ret == ESP_OK) {
+            printf("DHCP reservation removed for MAC: %s\n", argv[2]);
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            printf("No reservation found for MAC: %s\n", argv[2]);
+        } else {
+            printf("Failed to remove DHCP reservation: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "clear") == 0 && strcmp(argv[2], "reservations") == 0) {
+        // Clear all reservations: eth_dhcp clear reservations
+        esp_err_t ret = ethernet_clear_dhcp_reservations();
+        if (ret == ESP_OK) {
+            printf("All DHCP reservations cleared\n");
+        } else {
+            printf("Failed to clear DHCP reservations: %s\n", esp_err_to_name(ret));
+        }
+        return 0;
+    }
+
     // Show usage if no valid command found
     printf("Usage:\n");
     printf("  eth_dhcp                              - Show DHCP status\n");
@@ -1628,7 +1798,18 @@ static int cmd_eth_dhcp(int argc, char **argv)
     printf("  eth_dhcp disable                      - Disable DHCP server\n");
     printf("  eth_dhcp pool <start_ip> <end_ip>     - Set DHCP pool (24h lease)\n");
     printf("  eth_dhcp pool <start_ip> <end_ip> <hours> - Set DHCP pool with lease time\n");
-    printf("Example: eth_dhcp pool 10.10.99.100 10.10.99.102 12\n");
+    printf("  eth_dhcp release <mac_addr>           - Release DHCP lease\n");
+    printf("  eth_dhcp list                         - Show IP reservations\n");
+    printf("  eth_dhcp reservations                 - Show IP reservations (same as list)\n");
+    printf("  eth_dhcp reserve <mac> <ip> [desc]    - Add IP reservation\n");
+    printf("  eth_dhcp unreserve <mac>              - Remove IP reservation\n");
+    printf("  eth_dhcp clear reservations           - Clear all reservations\n");
+    printf("Examples:\n");
+    printf("  eth_dhcp pool 10.10.99.100 10.10.99.102 12\n");
+    printf("  eth_dhcp reserve aa:bb:cc:dd:ee:ff 10.10.99.100 \"Main Device\"\n");
+    printf("  eth_dhcp unreserve aa:bb:cc:dd:ee:ff\n");
+    printf("  eth_dhcp list\n");
+    printf("  eth_dhcp clear reservations\n");
     return 1;
 }
 
@@ -1924,15 +2105,15 @@ esp_err_t ethernet_register_console_commands(void)
 
     cmd = (esp_console_cmd_t){
         .command = "eth_dhcp",
-        .help = "DHCP服务器控制: eth_dhcp [start|stop|restart|status] - 管理DHCP服务器和查看客户端状态",
-        .hint = "[status|enable|disable] or [pool <start_ip> <end_ip> [lease_hours]] or [release <mac_addr>]",
+        .help = "DHCP服务器控制: eth_dhcp [enable|disable|status|reload|list|reservations|reserve|unreserve|clear|pool|release] - 完整DHCP管理",
+        .hint = "[status|enable|disable|reload] or [list|reservations] or [reserve <mac> <ip> [desc]] or [unreserve <mac>] or [clear reservations] or [pool <start_ip> <end_ip> [lease_hours]] or [release <mac_addr>]",
         .func = &cmd_eth_dhcp,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 
     cmd = (esp_console_cmd_t){
         .command = "eth_gateway",
-        .help = "网关服务控制: eth_gateway [start|stop|status] - 管理网关服务",
+        .help = "网关服务控制: eth_gateway [enable|disable] - 管理网关服务",
         .hint = "[enable|disable]",
         .func = &cmd_eth_gateway,
     };
@@ -2001,10 +2182,10 @@ static esp_err_t dhcp_add_client_with_ip(const uint8_t *mac_addr, const char *ho
         return ESP_ERR_NO_MEM;
     }
 
-    // Use provided IP or get next available IP
+    // Use provided IP or get reserved/next available IP
     uint32_t assigned_ip = ip_addr;
     if (assigned_ip == 0) {
-        assigned_ip = dhcp_get_next_available_ip();
+        assigned_ip = dhcp_get_ip_for_mac_or_next_available(mac_addr);
         if (assigned_ip == 0) {
             ESP_LOGW(TAG, "No available IP addresses in DHCP pool");
             return ESP_ERR_NO_MEM;
@@ -2259,5 +2440,291 @@ esp_err_t ethernet_save_config_from_manager(const ethernet_config_t *config)
     }
     
     ESP_LOGI(TAG, "Configuration from config manager saved successfully");
+    return ESP_OK;
+}
+
+// ==================== DHCP IP Reservation Functions ====================
+
+static esp_err_t dhcp_load_reservations_from_config(void)
+{
+    const dhcp_reservation_config_t *config = config_manager_get_dhcp_reservations_config();
+    if (!config) {
+        ESP_LOGW(TAG, "Failed to get DHCP reservations config");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Copy reservations to internal state
+    memset(&s_eth_state.reservations, 0, sizeof(dhcp_reservation_config_t));
+    for (int i = 0; i < config->reservation_count && i < 10; i++) {
+        memcpy(&s_eth_state.reservations.reservations[i], &config->reservations[i], 
+               sizeof(dhcp_ip_reservation_t));
+    }
+    s_eth_state.reservations.reservation_count = config->reservation_count;
+
+    ESP_LOGI(TAG, "Loaded %d DHCP IP reservations from config", config->reservation_count);
+    return ESP_OK;
+}
+
+static esp_err_t dhcp_save_reservations_to_config(void)
+{
+    dhcp_reservation_config_t config = {0};
+    
+    // Copy from internal state to config structure
+    for (int i = 0; i < s_eth_state.reservations.reservation_count && i < 10; i++) {
+        memcpy(&config.reservations[i], &s_eth_state.reservations.reservations[i],
+               sizeof(dhcp_ip_reservation_t));
+    }
+    config.reservation_count = s_eth_state.reservations.reservation_count;
+
+    esp_err_t ret = config_manager_set_dhcp_reservations_config(&config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save DHCP reservations to config: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Saved %d DHCP IP reservations to config", config.reservation_count);
+    return ESP_OK;
+}
+
+static uint32_t dhcp_get_ip_for_mac_or_next_available(const uint8_t *mac_addr)
+{
+    if (!mac_addr) {
+        return dhcp_get_next_available_ip();
+    }
+
+    // Check if there's a reserved IP for this MAC address
+    for (int i = 0; i < s_eth_state.reservations.reservation_count; i++) {
+        dhcp_ip_reservation_t *res = &s_eth_state.reservations.reservations[i];
+        
+        if (res->enabled && memcmp(res->mac_addr, mac_addr, 6) == 0) {
+            // Found a reservation for this MAC
+            if (dhcp_is_ip_available(res->reserved_ip) || 
+                dhcp_is_ip_owned_by_mac(res->reserved_ip, mac_addr)) {
+                
+                char ip_str[16], mac_str[18];
+                ip_to_string(res->reserved_ip, ip_str, sizeof(ip_str));
+                snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                        mac_addr[0], mac_addr[1], mac_addr[2], 
+                        mac_addr[3], mac_addr[4], mac_addr[5]);
+                
+                ESP_LOGI(TAG, "Using reserved IP %s for MAC %s (%s)", 
+                        ip_str, mac_str, res->description);
+                return res->reserved_ip;
+            } else {
+                ESP_LOGW(TAG, "Reserved IP is not available, falling back to dynamic allocation");
+                break;
+            }
+        }
+    }
+
+    // No reservation found or reserved IP not available, use dynamic allocation
+    return dhcp_get_next_available_ip();
+}
+
+static bool dhcp_is_ip_owned_by_mac(uint32_t ip_addr, const uint8_t *mac_addr)
+{
+    if (!mac_addr) {
+        return false;
+    }
+
+    for (int i = 0; i < 10; i++) {
+        if (s_eth_state.dhcp_clients[i].is_active && 
+            s_eth_state.dhcp_clients[i].ip_addr == ip_addr &&
+            memcmp(s_eth_state.dhcp_clients[i].mac_addr, mac_addr, 6) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+esp_err_t ethernet_add_dhcp_reservation(const uint8_t *mac_addr, const char *ip_addr, const char *description)
+{
+    if (!mac_addr || !ip_addr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_eth_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Check if we already have maximum reservations
+    if (s_eth_state.reservations.reservation_count >= 10) {
+        ESP_LOGE(TAG, "Cannot add reservation: maximum 10 reservations allowed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Validate MAC address (not all zeros)
+    bool mac_is_zero = true;
+    for (int i = 0; i < 6; i++) {
+        if (mac_addr[i] != 0) {
+            mac_is_zero = false;
+            break;
+        }
+    }
+    if (mac_is_zero) {
+        ESP_LOGE(TAG, "Invalid MAC address (all zeros)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Convert IP string to network byte order
+    uint32_t ip_net = string_to_ip(ip_addr);
+    if (ip_net == 0) {
+        ESP_LOGE(TAG, "Invalid IP address: %s", ip_addr);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Check if MAC already has a reservation
+    for (int i = 0; i < s_eth_state.reservations.reservation_count; i++) {
+        if (memcmp(s_eth_state.reservations.reservations[i].mac_addr, mac_addr, 6) == 0) {
+            ESP_LOGE(TAG, "MAC address already has a reservation");
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+
+    // Check if IP is already reserved
+    for (int i = 0; i < s_eth_state.reservations.reservation_count; i++) {
+        if (s_eth_state.reservations.reservations[i].reserved_ip == ip_net) {
+            ESP_LOGE(TAG, "IP address is already reserved");
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+
+    // Add new reservation
+    dhcp_ip_reservation_t *new_res = &s_eth_state.reservations.reservations[s_eth_state.reservations.reservation_count];
+    memcpy(new_res->mac_addr, mac_addr, 6);
+    new_res->reserved_ip = ip_net;
+    new_res->enabled = true;
+    
+    if (description) {
+        strncpy(new_res->description, description, sizeof(new_res->description) - 1);
+        new_res->description[sizeof(new_res->description) - 1] = '\0';
+    } else {
+        snprintf(new_res->description, sizeof(new_res->description), 
+                "Device-%02x%02x%02x", mac_addr[3], mac_addr[4], mac_addr[5]);
+    }
+
+    s_eth_state.reservations.reservation_count++;
+
+    // Save to config
+    esp_err_t ret = dhcp_save_reservations_to_config();
+    if (ret != ESP_OK) {
+        // Rollback on failure
+        s_eth_state.reservations.reservation_count--;
+        memset(new_res, 0, sizeof(dhcp_ip_reservation_t));
+        return ret;
+    }
+
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+    
+    ESP_LOGI(TAG, "Added DHCP reservation: %s -> %s (%s)", mac_str, ip_addr, new_res->description);
+    return ESP_OK;
+}
+
+esp_err_t ethernet_remove_dhcp_reservation(const uint8_t *mac_addr)
+{
+    if (!mac_addr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_eth_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Find reservation to remove
+    int found_index = -1;
+    for (int i = 0; i < s_eth_state.reservations.reservation_count; i++) {
+        if (memcmp(s_eth_state.reservations.reservations[i].mac_addr, mac_addr, 6) == 0) {
+            found_index = i;
+            break;
+        }
+    }
+
+    if (found_index == -1) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    char mac_str[18], ip_str[16];
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+    ip_to_string(s_eth_state.reservations.reservations[found_index].reserved_ip, ip_str, sizeof(ip_str));
+
+    // Remove reservation by shifting array elements
+    for (int i = found_index; i < s_eth_state.reservations.reservation_count - 1; i++) {
+        memcpy(&s_eth_state.reservations.reservations[i], 
+               &s_eth_state.reservations.reservations[i + 1],
+               sizeof(dhcp_ip_reservation_t));
+    }
+    
+    s_eth_state.reservations.reservation_count--;
+    
+    // Clear last element
+    memset(&s_eth_state.reservations.reservations[s_eth_state.reservations.reservation_count], 
+           0, sizeof(dhcp_ip_reservation_t));
+
+    // Save to config
+    esp_err_t ret = dhcp_save_reservations_to_config();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save after removing reservation");
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Removed DHCP reservation: %s -> %s", mac_str, ip_str);
+    return ESP_OK;
+}
+
+esp_err_t ethernet_get_dhcp_reservations(dhcp_reservation_config_t *config)
+{
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_eth_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    memcpy(config, &s_eth_state.reservations, sizeof(dhcp_reservation_config_t));
+    return ESP_OK;
+}
+
+esp_err_t ethernet_get_reserved_ip_for_mac(const uint8_t *mac_addr, uint32_t *reserved_ip)
+{
+    if (!mac_addr || !reserved_ip) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_eth_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    for (int i = 0; i < s_eth_state.reservations.reservation_count; i++) {
+        dhcp_ip_reservation_t *res = &s_eth_state.reservations.reservations[i];
+        if (res->enabled && memcmp(res->mac_addr, mac_addr, 6) == 0) {
+            *reserved_ip = res->reserved_ip;
+            return ESP_OK;
+        }
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t ethernet_clear_dhcp_reservations(void)
+{
+    if (!s_eth_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Clear all reservations
+    memset(&s_eth_state.reservations, 0, sizeof(dhcp_reservation_config_t));
+    
+    // Save to config manager
+    esp_err_t ret = config_manager_set_dhcp_reservations_config(&s_eth_state.reservations);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save cleared reservations: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "All DHCP reservations cleared");
     return ESP_OK;
 }

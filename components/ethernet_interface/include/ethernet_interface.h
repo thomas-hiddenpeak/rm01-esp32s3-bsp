@@ -85,6 +85,24 @@ typedef struct {
 } dhcp_client_info_t;
 
 /**
+ * @brief DHCP IP reservation structure for MAC-IP binding
+ */
+typedef struct {
+    uint8_t mac_addr[6];        ///< Reserved MAC address
+    uint32_t reserved_ip;       ///< Reserved IP address (network byte order)
+    char description[32];       ///< Device description (optional)
+    bool enabled;               ///< Whether this reservation is enabled
+} dhcp_ip_reservation_t;
+
+/**
+ * @brief DHCP reservation configuration structure
+ */
+typedef struct {
+    dhcp_ip_reservation_t reservations[10];  ///< IP reservations (max 10)
+    uint8_t reservation_count;               ///< Current reservation count
+} dhcp_reservation_config_t;
+
+/**
  * @brief DHCP server status structure
  */
 typedef struct {
@@ -266,6 +284,48 @@ esp_err_t ethernet_get_dhcp_client_by_ip(uint32_t ip_addr, dhcp_client_info_t *c
  * @return esp_err_t ESP_OK on success, ESP_ERR_NOT_FOUND if client not found
  */
 esp_err_t ethernet_release_dhcp_lease(const uint8_t *mac_addr);
+
+/**
+ * @brief Add DHCP IP reservation (MAC-IP binding)
+ * 
+ * @param mac_addr MAC address to bind (6 bytes)
+ * @param ip_addr IP address string to reserve
+ * @param description Optional device description
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t ethernet_add_dhcp_reservation(const uint8_t *mac_addr, const char *ip_addr, const char *description);
+
+/**
+ * @brief Remove DHCP IP reservation
+ * 
+ * @param mac_addr MAC address to remove binding (6 bytes)
+ * @return esp_err_t ESP_OK on success, ESP_ERR_NOT_FOUND if not found
+ */
+esp_err_t ethernet_remove_dhcp_reservation(const uint8_t *mac_addr);
+
+/**
+ * @brief Get all DHCP reservations
+ * 
+ * @param config Pointer to store reservation configuration
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t ethernet_get_dhcp_reservations(dhcp_reservation_config_t *config);
+
+/**
+ * @brief Get reserved IP for a specific MAC address
+ * 
+ * @param mac_addr MAC address to check (6 bytes)
+ * @param reserved_ip Pointer to store reserved IP (network byte order)
+ * @return esp_err_t ESP_OK if reservation found, ESP_ERR_NOT_FOUND otherwise
+ */
+esp_err_t ethernet_get_reserved_ip_for_mac(const uint8_t *mac_addr, uint32_t *reserved_ip);
+
+/**
+ * @brief Clear all DHCP IP reservations
+ * 
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t ethernet_clear_dhcp_reservations(void);
 
 /**
  * @brief Perform ping test

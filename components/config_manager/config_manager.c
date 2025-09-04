@@ -58,7 +58,19 @@ esp_err_t config_manager_init(void)
     }
 
     // Load default configuration
-    s_current_config = (complete_config_t)DEFAULT_COMPLETE_CONFIG();
+    memset(&s_current_config, 0, sizeof(complete_config_t));
+    
+    // Initialize each component with default values
+    s_current_config.fan = (fan_config_t)DEFAULT_FAN_CONFIG();
+    s_current_config.led = (led_config_t)DEFAULT_LED_CONFIG();
+    s_current_config.ethernet = (ethernet_config_t)DEFAULT_ETHERNET_CONFIG();
+    s_current_config.dhcp = (dhcp_config_t)DEFAULT_DHCP_CONFIG();
+    memset(&s_current_config.dhcp_reservations, 0, sizeof(dhcp_reservation_config_t));
+    s_current_config.gateway = (gateway_config_t)DEFAULT_GATEWAY_CONFIG();
+    s_current_config.usb_mux = (usb_mux_config_t)DEFAULT_USB_MUX_CONFIG();
+    s_current_config.web = (web_server_config_t)DEFAULT_WEB_SERVER_CONFIG();
+    s_current_config.system = (system_config_t)DEFAULT_SYSTEM_CONFIG();
+    s_current_config.config_version = 1;
     s_current_config.checksum = calculate_config_checksum(&s_current_config);
 
     s_initialized = true;
@@ -191,7 +203,19 @@ esp_err_t config_manager_reset_to_defaults(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    s_current_config = (complete_config_t)DEFAULT_COMPLETE_CONFIG();
+    memset(&s_current_config, 0, sizeof(complete_config_t));
+    
+    // Initialize each component with default values
+    s_current_config.fan = (fan_config_t)DEFAULT_FAN_CONFIG();
+    s_current_config.led = (led_config_t)DEFAULT_LED_CONFIG();
+    s_current_config.ethernet = (ethernet_config_t)DEFAULT_ETHERNET_CONFIG();
+    s_current_config.dhcp = (dhcp_config_t)DEFAULT_DHCP_CONFIG();
+    memset(&s_current_config.dhcp_reservations, 0, sizeof(dhcp_reservation_config_t));
+    s_current_config.gateway = (gateway_config_t)DEFAULT_GATEWAY_CONFIG();
+    s_current_config.usb_mux = (usb_mux_config_t)DEFAULT_USB_MUX_CONFIG();
+    s_current_config.web = (web_server_config_t)DEFAULT_WEB_SERVER_CONFIG();
+    s_current_config.system = (system_config_t)DEFAULT_SYSTEM_CONFIG();
+    s_current_config.config_version = 1;
     s_current_config.checksum = calculate_config_checksum(&s_current_config);
 
     ESP_LOGI(TAG, "Configuration reset to factory defaults");
@@ -391,6 +415,58 @@ esp_err_t config_manager_set_dhcp_config(const dhcp_config_t *config)
     s_current_config.checksum = calculate_config_checksum(&s_current_config);
     
     ESP_LOGI(TAG, "DHCP configuration updated");
+    return ESP_OK;
+}
+
+const dhcp_reservation_config_t* config_manager_get_dhcp_reservations_config(void)
+{
+    if (!s_initialized) {
+        return NULL;
+    }
+    return &s_current_config.dhcp_reservations;
+}
+
+esp_err_t config_manager_set_dhcp_reservations_config(const dhcp_reservation_config_t *config)
+{
+    if (!s_initialized || !config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 验证保留配置
+    if (config->reservation_count > 10) {
+        ESP_LOGE(TAG, "Invalid DHCP reservations count (max 10)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 验证每个保留配置的有效性
+    for (int i = 0; i < config->reservation_count; i++) {
+        const dhcp_ip_reservation_t *res = &config->reservations[i];
+        
+        // 检查MAC地址不能全为0
+        bool mac_is_zero = true;
+        for (int j = 0; j < 6; j++) {
+            if (res->mac_addr[j] != 0) {
+                mac_is_zero = false;
+                break;
+            }
+        }
+        if (mac_is_zero) {
+            ESP_LOGE(TAG, "Invalid MAC address in reservation %d (all zeros)", i);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        // 检查IP地址不能为0
+        if (res->reserved_ip == 0) {
+            ESP_LOGE(TAG, "Invalid IP address in reservation %d (zero)", i);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
+    s_current_config.dhcp_reservations = *config;
+    s_current_config.checksum = calculate_config_checksum(&s_current_config);
+    
+    ESP_LOGI(TAG, "DHCP reservations configuration updated (%d reservations)", 
+             config->reservation_count);
     return ESP_OK;
 }
 
