@@ -109,6 +109,43 @@ typedef enum {
 } power_state_t;
 
 /**
+ * @brief AGX网络状态枚举
+ */
+typedef enum {
+    AGX_NET_STATUS_UNKNOWN = 0,     ///< 未知状态
+    AGX_NET_STATUS_DOWN,            ///< 网络断开
+    AGX_NET_STATUS_UP,              ///< 网络连通
+    AGX_NET_STATUS_ERROR            ///< 网络错误
+} agx_net_status_t;
+
+/**
+ * @brief AGX系统监控状态
+ */
+typedef struct {
+    agx_net_status_t network_status;    ///< 网络连接状态
+    uint32_t last_ping_time_ms;         ///< 最后ping响应时间(ms)
+    bool metrics_available;             ///< metrics API是否可用
+    uint64_t last_check_time;           ///< 最后检查时间戳
+    uint32_t check_count;               ///< 检查次数
+    uint32_t network_error_count;       ///< 网络错误计数
+    uint32_t metrics_error_count;       ///< metrics错误计数
+    
+    // 从metrics API获取的系统信息
+    float cpu_usage_percent;            ///< CPU使用率 (%)
+    float gpu_usage_percent;            ///< GPU频率 (Hz) - 注意：字段名为历史原因，实际存储频率
+    uint64_t memory_total_kb;           ///< 总内存 (KB)
+    uint64_t memory_used_kb;            ///< 已用内存 (KB)
+    float memory_usage_percent;         ///< 内存使用率 (%)
+    float disk_total_gb;                ///< 磁盘总大小 (GB)
+    float disk_used_gb;                 ///< 磁盘已用大小 (GB)
+    float disk_usage_percent;           ///< 磁盘使用率 (%)
+    float temperature_cpu;              ///< CPU温度 (℃)
+    float temperature_gpu;              ///< GPU温度 (℃)
+    float total_power_mw;               ///< 总功耗 (mW)
+    float uptime_seconds;               ///< 运行时间 (秒)
+} agx_monitor_status_t;
+
+/**
  * @brief 硬件状态结构
  */
 typedef struct {
@@ -121,6 +158,7 @@ typedef struct {
     usb_mux_target_t usb_mux_target;    ///< USB MUX目标
     power_state_t agx_power_state;     ///< AGX电源状态
     power_state_t lpmu_power_state;     ///< LPMU电源状态
+    agx_monitor_status_t agx_monitor;   ///< AGX系统监控状态
 } hardware_status_t;
 
 // ==================== 初始化接口 ====================
@@ -681,6 +719,95 @@ esp_err_t hardware_get_status(hardware_status_t *status);
  *     - ESP_ERR_INVALID_STATE: 硬件未初始化
  */
 esp_err_t hardware_print_status(void);
+
+// ==================== AGX系统监控接口 ====================
+
+/**
+ * @brief 检查AGX网络连接状态
+ * 
+ * 通过ping AGX设备IP地址来检查网络连接状态
+ * 
+ * @return
+ *     - ESP_OK: 网络连接正常
+ *     - ESP_ERR_TIMEOUT: ping超时
+ *     - ESP_FAIL: 网络连接失败
+ */
+esp_err_t agx_check_network_status(void);
+
+/**
+ * @brief 获取AGX系统metrics信息
+ * 
+ * 通过HTTP API获取AGX系统运行状态信息
+ * 
+ * @return
+ *     - ESP_OK: 获取成功
+ *     - ESP_ERR_TIMEOUT: HTTP请求超时
+ *     - ESP_FAIL: 获取失败
+ */
+esp_err_t agx_get_metrics(void);
+
+/**
+ * @brief 执行完整的AGX系统监控检查
+ * 
+ * 包括网络连接检查和系统metrics获取
+ * 
+ * @return
+ *     - ESP_OK: 监控检查成功
+ *     - ESP_FAIL: 监控检查失败
+ */
+esp_err_t agx_monitor_check(void);
+
+/**
+ * @brief 获取AGX监控状态
+ * 
+ * @param monitor_status 存储监控状态的指针
+ * @return
+ *     - ESP_OK: 获取成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ *     - ESP_ERR_INVALID_STATE: 硬件未初始化
+ */
+esp_err_t agx_get_monitor_status(agx_monitor_status_t *monitor_status);
+
+/**
+ * @brief 打印AGX监控状态
+ * 
+ * @return
+ *     - ESP_OK: 打印成功
+ *     - ESP_ERR_INVALID_STATE: 硬件未初始化
+ */
+esp_err_t agx_print_monitor_status(void);
+
+/**
+ * @brief 获取AGX网络状态字符串
+ * 
+ * @param status 网络状态枚举值
+ * @return 网络状态描述字符串
+ */
+const char* agx_get_network_status_name(agx_net_status_t status);
+
+/**
+ * @brief 诊断AGX连接性
+ * 
+ * 测试AGX设备的网络连接和HTTP服务可用性
+ * 提供详细的诊断信息
+ * 
+ * @return
+ *     - ESP_OK: 诊断完成
+ *     - ESP_FAIL: 诊断过程中出现错误
+ */
+esp_err_t agx_diagnose_connection(void);
+
+/**
+ * @brief 测试AGX HTTP端口连接
+ * 
+ * 尝试连接到指定端口，不发送HTTP请求
+ * 
+ * @param port 要测试的端口号
+ * @return
+ *     - ESP_OK: 端口连接成功
+ *     - ESP_FAIL: 端口连接失败
+ */
+esp_err_t agx_test_port(uint16_t port);
 
 #ifdef __cplusplus
 }

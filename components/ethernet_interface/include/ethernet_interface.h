@@ -19,6 +19,21 @@ extern "C" {
 #endif
 
 /**
+ * @brief Get ethernet MAC address
+ * 
+ * @param mac Pointer to store MAC address (6 bytes)
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t ethernet_get_mac_address(uint8_t *mac);
+
+/**
+ * @brief Reset ethernet interface
+ * 
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t ethernet_reset(void);
+
+/**
  * @brief Ethernet interface configuration structure
  */
 typedef struct {

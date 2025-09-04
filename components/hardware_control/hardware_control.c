@@ -6,13 +6,20 @@
 #include "hardware_control.h"
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "esp_http_client.h"
+#include "esp_timer.h"
 #include "led_strip.h"
 #include "cJSON.h"
+#include "ethernet_interface.h"
 
 static const char *TAG = "HARDWARE_CONTROL";
 
@@ -54,6 +61,10 @@ esp_err_t hardware_control_init(void)
     s_hardware_status.usb_mux_target = USB_MUX_ESP32S3; // 默认连接到ESP32S3
     s_hardware_status.agx_power_state = POWER_STATE_UNKNOWN;
     s_hardware_status.lpmu_power_state = POWER_STATE_UNKNOWN;
+    
+    // 初始化AGX监控状态
+    s_hardware_status.agx_monitor.network_status = AGX_NET_STATUS_UNKNOWN;
+    s_hardware_status.agx_monitor.metrics_available = false;
 
     // 初始化风扇PWM
     esp_err_t ret = init_fan_pwm();
@@ -1752,4 +1763,603 @@ esp_err_t led_matrix_load_animation(const char *animation_name)
     }
 
     return ret;
+}
+
+// ==================== AGX系统监控接口实现 ====================
+
+// AGX设备配置
+#define AGX_IP_ADDRESS          "10.10.99.98"
+#define AGX_METRICS_URL         "http://10.10.99.98:59100/metrics"
+#define AGX_PING_TIMEOUT_MS     3000
+#define AGX_HTTP_TIMEOUT_MS     10000
+#define AGX_HTTP_BUFFER_SIZE    8192
+
+/**
+ * @brief HTTP事件处理器
+ */
+static esp_err_t agx_http_event_handler(esp_http_client_event_t *evt)
+{
+    char **response_buffer = (char **)evt->user_data;
+    
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGE(TAG, "HTTP_EVENT_ERROR - Connection or protocol error");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED - Successfully connected to server");
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT - Request headers sent");
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+            break;
+        case HTTP_EVENT_ON_DATA:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA - Received %d bytes", evt->data_len);
+            if (*response_buffer == NULL) {
+                *response_buffer = malloc(AGX_HTTP_BUFFER_SIZE);
+                if (*response_buffer == NULL) {
+                    ESP_LOGE(TAG, "Failed to allocate memory for response buffer");
+                    return ESP_ERR_NO_MEM;
+                }
+                memset(*response_buffer, 0, AGX_HTTP_BUFFER_SIZE);
+            }
+            
+            int current_len = strlen(*response_buffer);
+            int remaining_space = AGX_HTTP_BUFFER_SIZE - current_len - 1;
+            
+            if (evt->data_len <= remaining_space) {
+                strncat(*response_buffer, (char*)evt->data, evt->data_len);
+            } else {
+                ESP_LOGW(TAG, "Response buffer full, truncating data");
+                strncat(*response_buffer, (char*)evt->data, remaining_space);
+            }
+            break;
+        case HTTP_EVENT_ON_FINISH:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH - Request completed");
+            break;
+        case HTTP_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED - Connection closed");
+            break;
+        case HTTP_EVENT_REDIRECT:
+            ESP_LOGI(TAG, "HTTP_EVENT_REDIRECT - Redirect response received");
+            break;
+    }
+    return ESP_OK;
+}
+
+/**
+ * @brief 解析metrics数据中的浮点数值
+ */
+static float parse_metrics_value(const char *metrics_data, const char *metric_name, const char *label_filter)
+{
+    char search_pattern[256];
+    if (label_filter && strlen(label_filter) > 0) {
+        snprintf(search_pattern, sizeof(search_pattern), "%s{%s}", metric_name, label_filter);
+    } else {
+        snprintf(search_pattern, sizeof(search_pattern), "%s ", metric_name);
+    }
+    
+    char *line_start = strstr(metrics_data, search_pattern);
+    if (line_start == NULL) {
+        return -1.0f;
+    }
+    
+    // 找到行末或者空格后的数值
+    char *value_start = strchr(line_start, ' ');
+    if (value_start == NULL) {
+        return -1.0f;
+    }
+    value_start++; // 跳过空格
+    
+    return strtof(value_start, NULL);
+}
+
+/**
+ * @brief 解析CPU使用率（计算多核平均值）
+ */
+static float parse_cpu_usage(const char *metrics_data)
+{
+    float total_idle = 0.0f;
+    int core_count = 0;
+    
+    // 查找所有CPU核心的空闲值 (statistic="val")
+    const char *search_pos = metrics_data;
+    char search_pattern[] = "cpu_Hz{core=\"";
+    
+    while ((search_pos = strstr(search_pos, search_pattern)) != NULL) {
+        // 检查是否是val统计 (空闲率)
+        char *val_pos = strstr(search_pos, "statistic=\"val\"");
+        if (val_pos != NULL && (val_pos - search_pos) < 100) { // 确保在同一行
+            // 找到数值
+            char *value_start = strchr(val_pos, ' ');
+            if (value_start != NULL) {
+                value_start++;
+                float core_idle = strtof(value_start, NULL);
+                // 确保空闲率在合理范围内 (0-100%)
+                if (core_idle >= 0.0f && core_idle <= 100.0f) {
+                    total_idle += core_idle;
+                    core_count++;
+                    ESP_LOGD(TAG, "Core %d idle: %.1f%%, usage: %.1f%%", 
+                             core_count-1, core_idle, 100.0f - core_idle);
+                }
+            }
+        }
+        search_pos++;
+    }
+    
+    if (core_count > 0) {
+        float avg_idle = total_idle / core_count;
+        float avg_usage = 100.0f - avg_idle;  // 使用率 = 100% - 空闲率
+        ESP_LOGI(TAG, "Parsed CPU usage: %.1f%% (100%% - %.1f%% idle, average of %d cores)", 
+                 avg_usage, avg_idle, core_count);
+        return avg_usage;
+    } else {
+        ESP_LOGW(TAG, "No CPU usage data found in metrics");
+        return -1.0f;
+    }
+}
+
+esp_err_t agx_check_network_status(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "Checking AGX network status...");
+    
+    ping_result_t ping_result = {0};
+    esp_err_t ret = ethernet_ping(AGX_IP_ADDRESS, 1, AGX_PING_TIMEOUT_MS, &ping_result);
+    
+    if (ret == ESP_OK && ping_result.success && ping_result.packets_received > 0) {
+        s_hardware_status.agx_monitor.network_status = AGX_NET_STATUS_UP;
+        s_hardware_status.agx_monitor.last_ping_time_ms = ping_result.avg_time_ms;
+        ESP_LOGI(TAG, "AGX network is UP (ping: %lu ms)", ping_result.avg_time_ms);
+    } else {
+        s_hardware_status.agx_monitor.network_status = AGX_NET_STATUS_DOWN;
+        s_hardware_status.agx_monitor.network_error_count++;
+        ESP_LOGW(TAG, "AGX network is DOWN");
+    }
+    
+    s_hardware_status.agx_monitor.last_check_time = esp_timer_get_time() / 1000; // 转换为毫秒
+    s_hardware_status.agx_monitor.check_count++;
+    
+    return ret;
+}
+
+esp_err_t agx_get_metrics(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // 检查以太网状态
+    ethernet_status_t eth_status = ethernet_get_status();
+    ESP_LOGI(TAG, "Current ethernet status: %d", eth_status);
+    
+    if (eth_status < ETH_STATUS_GOT_IP) {
+        ESP_LOGE(TAG, "Ethernet not ready (status %d), cannot get metrics", eth_status);
+        printf("错误: 以太网未获取IP地址，当前状态: %d\n", eth_status);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Getting AGX metrics from %s...", AGX_METRICS_URL);
+    
+    char *response_buffer = NULL;
+    esp_err_t ret = ESP_FAIL;
+
+    esp_http_client_config_t config = {
+        .url = AGX_METRICS_URL,
+        .timeout_ms = 15000,  // 增加超时时间到15秒
+        .event_handler = agx_http_event_handler,
+        .user_data = &response_buffer,
+        .buffer_size = AGX_HTTP_BUFFER_SIZE,
+        .buffer_size_tx = 512,
+        .method = HTTP_METHOD_GET,
+        .transport_type = HTTP_TRANSPORT_OVER_TCP,
+        .keep_alive_enable = false,
+        .disable_auto_redirect = true,
+    };
+
+    ESP_LOGI(TAG, "Initializing HTTP client with config: timeout=%d, buffer=%d", 15000, AGX_HTTP_BUFFER_SIZE);
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        printf("错误: 无法初始化HTTP客户端\n");
+        return ESP_FAIL;
+    }
+    
+    // 设置简单的HTTP头
+    esp_http_client_set_header(client, "User-Agent", "ESP32S3");
+    esp_http_client_set_header(client, "Accept", "*/*");
+    esp_http_client_set_header(client, "Connection", "close");
+    
+    ESP_LOGI(TAG, "Starting HTTP GET request to %s", AGX_METRICS_URL);
+    
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        int status_code = esp_http_client_get_status_code(client);
+        int64_t content_length = esp_http_client_get_content_length(client);
+        
+        ESP_LOGI(TAG, "HTTP Response: Status=%d, Content-Length=%lld", status_code, content_length);
+        
+        if (status_code == 200 && response_buffer != NULL && strlen(response_buffer) > 0) {
+            ESP_LOGI(TAG, "Successfully received metrics data (%d bytes)", strlen(response_buffer));
+            
+            // 解析metrics数据
+            s_hardware_status.agx_monitor.metrics_available = true;
+            
+            // CPU使用率 - 解析所有核心的平均使用率 (100% - 空闲率)
+            s_hardware_status.agx_monitor.cpu_usage_percent = parse_cpu_usage(response_buffer);
+            
+            // GPU频率 - 注意这是频率而不是使用率
+            s_hardware_status.agx_monitor.gpu_usage_percent = 
+                parse_metrics_value(response_buffer, "gpu_utilization_percentage_Hz", "nvidia_gpu=\"freq\",statistic=\"gpu\"");
+            
+            // 内存信息
+            s_hardware_status.agx_monitor.memory_total_kb = 
+                parse_metrics_value(response_buffer, "ram_kB", "statistic=\"total\"");
+            s_hardware_status.agx_monitor.memory_used_kb = 
+                parse_metrics_value(response_buffer, "ram_kB", "statistic=\"used\"");
+            
+            if (s_hardware_status.agx_monitor.memory_total_kb > 0) {
+                s_hardware_status.agx_monitor.memory_usage_percent = 
+                    (s_hardware_status.agx_monitor.memory_used_kb / s_hardware_status.agx_monitor.memory_total_kb) * 100.0f;
+            }
+            
+            // 磁盘信息
+            s_hardware_status.agx_monitor.disk_total_gb = 
+                parse_metrics_value(response_buffer, "disk_GB", "mountpoint=\"total\"");
+            s_hardware_status.agx_monitor.disk_used_gb = 
+                parse_metrics_value(response_buffer, "disk_GB", "mountpoint=\"used\"");
+            
+            if (s_hardware_status.agx_monitor.disk_total_gb > 0) {
+                s_hardware_status.agx_monitor.disk_usage_percent = 
+                    (s_hardware_status.agx_monitor.disk_used_gb / s_hardware_status.agx_monitor.disk_total_gb) * 100.0f;
+            }
+            
+            // 温度信息
+            s_hardware_status.agx_monitor.temperature_cpu = 
+                parse_metrics_value(response_buffer, "temperature_C", "statistic=\"cpu\"");
+            s_hardware_status.agx_monitor.temperature_gpu = 
+                parse_metrics_value(response_buffer, "temperature_C", "statistic=\"gpu\"");
+            
+            // 功耗信息
+            s_hardware_status.agx_monitor.total_power_mw = 
+                parse_metrics_value(response_buffer, "integrated_power_mW", "statistic=\"power\"");
+            
+            // 运行时间（保持为浮点数秒）
+            s_hardware_status.agx_monitor.uptime_seconds = 
+                parse_metrics_value(response_buffer, "uptime_s", "statistic=\"alive\"");
+            
+            ESP_LOGI(TAG, "AGX metrics updated successfully");
+            ret = ESP_OK;
+        } else if (status_code == 404) {
+            ESP_LOGE(TAG, "Metrics endpoint not found (HTTP 404)");
+            printf("错误: Metrics API端点不存在 (HTTP 404)\n");
+            printf("检查: AGX设备上是否运行了metrics服务在59100端口\n");
+            s_hardware_status.agx_monitor.metrics_available = false;
+            s_hardware_status.agx_monitor.metrics_error_count++;
+            ret = ESP_ERR_NOT_FOUND;
+        } else if (status_code == 403 || status_code == 401) {
+            ESP_LOGE(TAG, "Access denied to metrics endpoint (HTTP %d)", status_code);
+            printf("错误: 访问metrics API被拒绝 (HTTP %d)\n", status_code);
+            printf("检查: metrics服务是否需要认证或权限设置\n");
+            s_hardware_status.agx_monitor.metrics_available = false;
+            s_hardware_status.agx_monitor.metrics_error_count++;
+            ret = ESP_ERR_NOT_ALLOWED;
+        } else if (status_code >= 500) {
+            ESP_LOGE(TAG, "Server error (HTTP %d)", status_code);
+            printf("错误: AGX设备服务器错误 (HTTP %d)\n", status_code);
+            printf("建议: 检查AGX设备上的metrics服务状态\n");
+            s_hardware_status.agx_monitor.metrics_available = false;
+            s_hardware_status.agx_monitor.metrics_error_count++;
+            ret = ESP_FAIL;
+        } else {
+            ESP_LOGE(TAG, "HTTP GET failed with status: %d", status_code);
+            printf("错误: HTTP请求失败，状态码: %d\n", status_code);
+            if (response_buffer == NULL || strlen(response_buffer) == 0) {
+                printf("提示: 服务器没有返回数据\n");
+            }
+            s_hardware_status.agx_monitor.metrics_available = false;
+            s_hardware_status.agx_monitor.metrics_error_count++;
+            ret = ESP_FAIL;
+        }
+    } else {
+        ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(err));
+        printf("错误: HTTP连接失败 - %s\n", esp_err_to_name(err));
+        
+        // 提供更具体的错误信息
+        switch (err) {
+            case ESP_ERR_HTTP_CONNECT:
+                printf("原因: 无法连接到AGX设备的59100端口\n");
+                printf("检查: 1) AGX设备是否开机 2) metrics服务是否运行 3) 防火墙设置\n");
+                break;
+            case ESP_ERR_TIMEOUT:
+                printf("原因: 连接或响应超时\n");
+                printf("检查: 网络连接质量和AGX设备响应速度\n");
+                break;
+            case ESP_ERR_HTTP_INVALID_TRANSPORT:
+                printf("原因: 传输协议错误\n");
+                printf("检查: URL格式是否正确\n");
+                break;
+            default:
+                printf("建议: 使用 'agx diagnose' 命令进行详细诊断\n");
+                break;
+        }
+        
+        s_hardware_status.agx_monitor.metrics_available = false;
+        s_hardware_status.agx_monitor.metrics_error_count++;
+        ret = err;
+    }
+    
+    esp_http_client_cleanup(client);
+    
+    if (response_buffer) {
+        free(response_buffer);
+    }
+    
+    return ret;
+}
+
+esp_err_t agx_monitor_check(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "Starting AGX monitor check...");
+    
+    esp_err_t network_ret = agx_check_network_status();
+    
+    // 只有网络连通才尝试获取metrics
+    if (s_hardware_status.agx_monitor.network_status == AGX_NET_STATUS_UP) {
+        esp_err_t metrics_ret = agx_get_metrics();
+        (void)metrics_ret; // 避免未使用变量警告
+    } else {
+        ESP_LOGW(TAG, "Network down, skipping metrics collection");
+        s_hardware_status.agx_monitor.metrics_available = false;
+    }
+    
+    // 只要网络检查成功就认为监控检查成功
+    return network_ret;
+}
+
+esp_err_t agx_get_monitor_status(agx_monitor_status_t *monitor_status)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (monitor_status == NULL) {
+        ESP_LOGE(TAG, "Invalid parameter: monitor_status is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    memcpy(monitor_status, &s_hardware_status.agx_monitor, sizeof(agx_monitor_status_t));
+    return ESP_OK;
+}
+
+esp_err_t agx_print_monitor_status(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    const agx_monitor_status_t *monitor = &s_hardware_status.agx_monitor;
+    
+    printf("\n=== AGX系统监控状态 ===\n");
+    printf("网络状态: %s\n", agx_get_network_status_name(monitor->network_status));
+    
+    if (monitor->network_status == AGX_NET_STATUS_UP) {
+        printf("Ping响应时间: %lu ms\n", monitor->last_ping_time_ms);
+    }
+    
+    printf("Metrics可用: %s\n", monitor->metrics_available ? "是" : "否");
+    printf("检查次数: %lu\n", monitor->check_count);
+    printf("网络错误: %lu\n", monitor->network_error_count);
+    printf("Metrics错误: %lu\n", monitor->metrics_error_count);
+    
+    if (monitor->last_check_time > 0) {
+        printf("最后检查: %llu ms前\n", (esp_timer_get_time() / 1000) - monitor->last_check_time);
+    }
+    
+    if (monitor->metrics_available) {
+        printf("\n--- 系统信息 ---\n");
+        if (monitor->cpu_usage_percent >= 0) {
+            printf("CPU使用率: %.1f%%\n", monitor->cpu_usage_percent);
+        }
+        if (monitor->gpu_usage_percent >= 0) {
+            // 将Hz转换为MHz显示GPU频率
+            printf("GPU频率: %.0f MHz\n", monitor->gpu_usage_percent / 1000000.0f);
+        }
+        if (monitor->memory_total_kb > 0) {
+            printf("内存使用: %.1f%% (%.1f/%.1f MB)\n", 
+                   monitor->memory_usage_percent,
+                   monitor->memory_used_kb / 1024.0f,
+                   monitor->memory_total_kb / 1024.0f);
+        }
+        if (monitor->disk_total_gb > 0) {
+            printf("磁盘使用: %.1f%% (%.1f/%.1f GB)\n",
+                   monitor->disk_usage_percent,
+                   monitor->disk_used_gb,
+                   monitor->disk_total_gb);
+        }
+        if (monitor->temperature_cpu >= 0) {
+            printf("CPU温度: %.1f°C\n", monitor->temperature_cpu);
+        }
+        if (monitor->temperature_gpu >= 0) {
+            printf("GPU温度: %.1f°C\n", monitor->temperature_gpu);
+        }
+        if (monitor->total_power_mw > 0) {
+            printf("总功耗: %.1f W\n", monitor->total_power_mw / 1000.0f);
+        }
+        if (monitor->uptime_seconds > 0) {
+            // 精确显示运行时间到秒
+            int total_seconds = (int)monitor->uptime_seconds;
+            int hours = total_seconds / 3600;
+            int minutes = (total_seconds % 3600) / 60;
+            int seconds = total_seconds % 60;
+            
+            if (hours > 0) {
+                printf("运行时间: %d小时%d分%d秒\n", hours, minutes, seconds);
+            } else if (minutes > 0) {
+                printf("运行时间: %d分%d秒\n", minutes, seconds);
+            } else {
+                printf("运行时间: %d秒\n", seconds);
+            }
+        }
+    }
+    
+    printf("=====================\n\n");
+    
+    return ESP_OK;
+}
+
+const char* agx_get_network_status_name(agx_net_status_t status)
+{
+    switch (status) {
+        case AGX_NET_STATUS_UNKNOWN: return "未知";
+        case AGX_NET_STATUS_DOWN:    return "断开";
+        case AGX_NET_STATUS_UP:      return "连通";
+        case AGX_NET_STATUS_ERROR:   return "错误";
+        default:                     return "无效";
+    }
+}
+
+esp_err_t agx_test_port(uint16_t port)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "Testing AGX port %d connection...", port);
+    
+    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        return ESP_FAIL;
+    }
+    
+    // 设置连接超时
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
+    
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = inet_addr(AGX_IP_ADDRESS);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(port);
+    
+    int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    
+    if (err == 0) {
+        ESP_LOGI(TAG, "Port %d: Connection successful", port);
+        
+        // 对metrics端口(59100)进行HTTP测试
+        if (port == 59100) {
+            char http_request[] = 
+                "GET /metrics HTTP/1.1\r\n"
+                "Host: " AGX_IP_ADDRESS ":59100\r\n"
+                "User-Agent: ESP32S3\r\n"
+                "Accept: */*\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            
+            int sent = send(sock, http_request, strlen(http_request), 0);
+            if (sent > 0) {
+                ESP_LOGI(TAG, "HTTP request sent to metrics service");
+                
+                char response[256];
+                int received = recv(sock, response, sizeof(response) - 1, 0);
+                if (received > 0) {
+                    response[received] = '\0';
+                    ESP_LOGI(TAG, "Received HTTP response: %.50s...", response);
+                    // 检查是否是有效的HTTP响应
+                    if (strstr(response, "HTTP/1.1 200") || strstr(response, "HTTP/1.0 200")) {
+                        ESP_LOGI(TAG, "Metrics service responded with HTTP 200 OK");
+                    }
+                }
+            }
+        }
+        
+        close(sock);
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "Port %d: Connection failed - errno %d", port, errno);
+        close(sock);
+        return ESP_FAIL;
+    }
+}
+
+esp_err_t agx_diagnose_connection(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    printf("\n=== AGX状态诊断 ===\n");
+    
+    // 1. 网络连通性测试
+    printf("1. 网络连通性测试...\n");
+    ping_result_t ping_result = {0};
+    esp_err_t ping_ret = ethernet_ping(AGX_IP_ADDRESS, 3, 2000, &ping_result);
+    
+    if (ping_ret == ESP_OK && ping_result.success && ping_result.packets_received > 0) {
+        printf("   ✓ 网络连通 (avg: %lu ms, loss: %lu%%)\n", 
+               ping_result.avg_time_ms,
+               ((ping_result.packets_sent - ping_result.packets_received) * 100) / ping_result.packets_sent);
+    } else {
+        printf("   ✗ 网络不通 - 请检查AGX设备是否开机及网络连接\n");
+        printf("================\n\n");
+        return ESP_FAIL;
+    }
+    
+    // 2. Metrics服务测试
+    printf("2. Metrics服务测试...\n");
+    esp_err_t metrics_ret = agx_test_port(59100);
+    
+    if (metrics_ret == ESP_OK) {
+        printf("   ✓ Metrics服务端口59100可连接\n");
+        
+        // 尝试获取实际的metrics数据
+        printf("3. Metrics数据获取测试...\n");
+        esp_err_t get_ret = agx_get_metrics();
+        if (get_ret == ESP_OK) {
+            printf("   ✓ Metrics数据获取成功\n");
+            printf("   AGX系统监控已就绪\n");
+        } else {
+            printf("   ✗ Metrics数据获取失败 - %s\n", esp_err_to_name(get_ret));
+            printf("   建议：检查metrics数据格式或网络稳定性\n");
+        }
+    } else {
+        printf("   ✗ Metrics服务端口59100无法连接\n");
+        printf("   建议：检查AGX设备metrics服务是否运行\n");
+    }
+    
+    // 3. 诊断总结
+    printf("4. 诊断总结...\n");
+    if (ping_ret == ESP_OK && metrics_ret == ESP_OK) {
+        printf("   ✓ AGX设备状态监控功能正常\n");
+        printf("   可以使用 'agx monitor' 或 'agx metrics' 命令获取监控数据\n");
+    } else if (ping_ret == ESP_OK) {
+        printf("   AGX设备网络正常，但metrics服务不可用\n");
+        printf("   请检查AGX设备上的监控服务配置\n");
+    } else {
+        printf("   AGX设备网络不可达\n");
+        printf("   请检查设备电源和网络连接\n");
+    }
+    
+    printf("================\n\n");
+    
+    return ESP_OK;
 }

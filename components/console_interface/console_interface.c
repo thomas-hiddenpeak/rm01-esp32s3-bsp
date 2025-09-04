@@ -261,7 +261,7 @@ esp_err_t console_interface_register_device_commands(void)
         },
         {
             .command = "agx",
-            .help = "AGX电源控制: agx on|off|reset|recovery|status",
+            .help = "AGX电源控制和系统监控: agx on|off|reset|recovery|status|monitor|ping|metrics|diagnose",
             .func = &cmd_agx,
         },
         {
@@ -1872,6 +1872,12 @@ static int cmd_help(int argc, char **argv)
     printf("  agx reset           - 重启AGX设备\n");
     printf("  agx recovery        - 进入恢复模式并切换USB到AGX\n");
     printf("  agx status          - 显示AGX电源状态\n");
+    printf("\nAGX系统监控:\n");
+    printf("  agx monitor         - 完整AGX监控检查 (网络+系统指标)\n");
+    printf("  agx ping            - 检查AGX网络连接 (ping 10.10.99.98)\n");
+    printf("  agx metrics         - 获取AGX系统运行指标\n");
+    printf("  agx diagnose        - 诊断AGX连接问题\n");
+    printf("    监控信息包括: CPU/GPU频率和使用率、内存、存储、温度、功耗、运行时间\n");
     printf("\nLPMU设备控制:\n");
     printf("  lpmu toggle          - 切换LPMU开机/关机状态\n");
     printf("  lpmu reset           - 重启LPMU设备\n");
@@ -1980,8 +1986,33 @@ static int cmd_status(int argc, char **argv)
         printf("风扇速度: %d%%\n", status.hardware.fan_speed);
         printf("板载LED亮度: %d%%\n", status.hardware.board_led_brightness);
         printf("触摸LED亮度: %d%%\n", status.hardware.touch_led_brightness);
+        printf("AGX电源状态: %s\n", power_state_get_name(status.hardware.agx_power_state));
+        printf("LPMU电源状态: %s\n", power_state_get_name(status.hardware.lpmu_power_state));
+        
+        // 显示AGX监控状态
+        if (status.hardware.agx_monitor.check_count > 0) {
+            printf("\n--- AGX监控状态 ---\n");
+            printf("网络状态: %s\n", agx_get_network_status_name(status.hardware.agx_monitor.network_status));
+            if (status.hardware.agx_monitor.network_status == AGX_NET_STATUS_UP) {
+                printf("Ping响应: %lu ms\n", status.hardware.agx_monitor.last_ping_time_ms);
+            }
+            printf("Metrics可用: %s\n", status.hardware.agx_monitor.metrics_available ? "是" : "否");
+            printf("检查次数: %lu\n", status.hardware.agx_monitor.check_count);
+            if (status.hardware.agx_monitor.metrics_available) {
+                if (status.hardware.agx_monitor.cpu_usage_percent >= 0) {
+                    printf("CPU使用率: %.1f%%\n", status.hardware.agx_monitor.cpu_usage_percent);
+                }
+                if (status.hardware.agx_monitor.memory_usage_percent >= 0) {
+                    printf("内存使用率: %.1f%%\n", status.hardware.agx_monitor.memory_usage_percent);
+                }
+                if (status.hardware.agx_monitor.temperature_cpu >= 0) {
+                    printf("CPU温度: %.1f°C\n", status.hardware.agx_monitor.temperature_cpu);
+                }
+            }
+        }
     }
     if (status.monitor_available) {
+        printf("\n--- 系统监控 ---\n");
         printf("可用堆内存: %" PRIu32 " bytes\n", status.system.free_heap);
         printf("运行时间: %" PRIu64 " ms\n", status.system.uptime_ms);
     }
@@ -2291,7 +2322,7 @@ static int cmd_usbmux(int argc, char **argv)
 static int cmd_agx(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("用法: agx on|off|reset|recovery|status\n");
+        printf("用法: agx on|off|reset|recovery|status|monitor|ping|metrics|diagnose\n");
         return 1;
     }
     
@@ -2338,13 +2369,53 @@ static int cmd_agx(int argc, char **argv)
             printf("AGX电源状态: %s\n", power_state_get_name(state));
         }
     }
+    else if (strcmp(argv[1], "monitor") == 0) {
+        printf("正在检查AGX系统状态...\n");
+        ret = agx_monitor_check();
+        if (ret == ESP_OK) {
+            printf("AGX监控检查完成\n");
+            agx_print_monitor_status();
+        } else {
+            printf("AGX监控检查失败: %s\n", esp_err_to_name(ret));
+        }
+    }
+    else if (strcmp(argv[1], "ping") == 0) {
+        printf("正在ping AGX设备...\n");
+        ret = agx_check_network_status();
+        if (ret == ESP_OK) {
+            printf("AGX网络连接正常\n");
+        } else {
+            printf("AGX网络连接失败: %s\n", esp_err_to_name(ret));
+        }
+    }
+    else if (strcmp(argv[1], "metrics") == 0) {
+        printf("正在获取AGX系统metrics...\n");
+        ret = agx_get_metrics();
+        if (ret == ESP_OK) {
+            printf("AGX metrics获取成功\n");
+            agx_print_monitor_status();
+        } else {
+            printf("AGX metrics获取失败: %s\n", esp_err_to_name(ret));
+            printf("提示: 使用 'agx diagnose' 命令进行详细诊断\n");
+        }
+    }
+    else if (strcmp(argv[1], "diagnose") == 0) {
+        printf("正在执行AGX连接诊断...\n");
+        ret = agx_diagnose_connection();
+        // 诊断总是返回信息，不管ret值如何都不视为错误
+        return 0;
+    }
     else {
-        printf("用法: agx on|off|reset|recovery|status\n");
+        printf("用法: agx on|off|reset|recovery|status|monitor|ping|metrics|diagnose\n");
         printf("  on       - 开机AGX设备\n");
         printf("  off      - 关机AGX设备\n");
         printf("  reset    - 重启AGX设备\n");
         printf("  recovery - 进入恢复模式并切换USB到AGX\n");
         printf("  status   - 显示AGX电源状态\n");
+        printf("  monitor  - 完整的AGX系统监控检查(网络+metrics)\n");
+        printf("  ping     - 检查AGX网络连接状态\n");
+        printf("  metrics  - 获取AGX系统运行状态信息\n");
+        printf("  diagnose - 诊断AGX连接问题\n");
         return 1;
     }
     

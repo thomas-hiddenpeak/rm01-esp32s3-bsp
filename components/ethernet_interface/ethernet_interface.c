@@ -638,9 +638,13 @@ static void ethernet_event_handler(void *arg, esp_event_base_t event_base, int32
         switch (event_id) {
         case ETHERNET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "Ethernet Link Up");
-            s_eth_state.status = ETH_STATUS_CONNECTED;
+            // 只有在当前状态低于CONNECTED时才设置为CONNECTED
+            // 避免覆盖已经设置的GOT_IP状态
+            if (s_eth_state.status < ETH_STATUS_CONNECTED) {
+                s_eth_state.status = ETH_STATUS_CONNECTED;
+                trigger_ethernet_event(ETH_STATUS_CONNECTED, NULL);
+            }
             xEventGroupSetBits(s_eth_state.event_group, ETH_CONNECTED_BIT);
-            trigger_ethernet_event(ETH_STATUS_CONNECTED, NULL);
             break;
         case ETHERNET_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "Ethernet Link Down");

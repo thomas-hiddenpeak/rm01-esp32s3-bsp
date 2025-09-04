@@ -172,6 +172,16 @@ idf.py -p [PORT] flash monitor
   - `usbmux status` - 查看当前连接状态
 
 #### 设备电源控制命令
+- `agx <action>` - AGX设备电源控制和系统监控
+  - `agx on` - 开机AGX设备
+  - `agx off` - 关机AGX设备  
+  - `agx reset` - 重启AGX设备
+  - `agx recovery` - 进入恢复模式并切换USB到AGX
+  - `agx status` - 显示AGX电源状态
+  - `agx monitor` - 完整的AGX系统监控检查(网络+metrics)
+  - `agx ping` - 检查AGX网络连接状态
+  - `agx metrics` - 获取AGX系统运行状态信息
+  - `agx diagnose` - 诊断AGX连接问题
 - `orin <action>` - Orin设备电源控制
   - `orin on` - 开机Orin设备
   - `orin off` - 关机Orin设备
@@ -261,6 +271,35 @@ matrix config show              # 显示当前配置
 ```
 
 > 📖 **LED矩阵详细指南**: 请参考 `markdown/LED_MATRIX_USAGE_GUIDE.md` 获取完整的LED矩阵使用手册
+
+#### AGX系统监控功能
+
+AGX设备系统状态监控提供两个层面的监控功能：
+
+**快速监控命令**:
+```bash
+# 完整系统监控 (网络检查 + 系统指标)
+agx monitor                     # 显示网络连接和系统运行状态
+
+# 网络连通性检查
+agx ping                        # ping 10.10.99.98 检查网络连接
+
+# 系统运行指标
+agx metrics                     # 获取CPU、GPU、内存、温度等详细信息
+
+# 连接诊断
+agx diagnose                    # 诊断AGX连接问题，提供详细网络状态
+```
+
+**监控信息包括**:
+- **网络状态**: 以太网接口状态、IP连接、ping延迟
+- **CPU状态**: 频率(MHz)、使用率(%)
+- **GPU状态**: 频率(MHz) 
+- **内存使用**: 已用/总量(MB)
+- **存储空间**: 已用/总量(GB)
+- **系统温度**: CPU温度(°C)
+- **功耗**: 整机功耗(W)
+- **运行时间**: 系统正常运行时长
 
 ## 📁 项目结构
 
