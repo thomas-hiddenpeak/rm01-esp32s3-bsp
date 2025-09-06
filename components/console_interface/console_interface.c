@@ -28,6 +28,7 @@
 #include "ethernet_interface.h"
 #include "config_manager.h"
 #include "sdcard_interface.h"
+#include "color_correction.h"
 #include "web_server.h"
 #include "web_server.h"
 
@@ -59,6 +60,7 @@ static int cmd_fan(int argc, char **argv);
 static int cmd_bled(int argc, char **argv);
 static int cmd_tled(int argc, char **argv);
 static int cmd_matrix(int argc, char **argv);
+static int cmd_color_correction(int argc, char **argv);
 static int cmd_gpio(int argc, char **argv);
 static int cmd_usbmux(int argc, char **argv);
 static int cmd_agx(int argc, char **argv);
@@ -248,6 +250,11 @@ esp_err_t console_interface_register_device_commands(void)
             .command = "matrix",
             .help = "LED矩阵控制: matrix clear|test|bright <0-100>|pixel <x> <y> <r> <g> <b>|load <animation>|config [save|show]",
             .func = &cmd_matrix,
+        },
+        {
+            .command = "color",
+            .help = "色彩校正: color enable|disable|white <r> <g> <b>|gamma <value>|bright <value>|sat <value>|show|save|load|reset",
+            .func = &cmd_color_correction,
         },
         {
             .command = "gpio",
@@ -1857,6 +1864,17 @@ static int cmd_help(int argc, char **argv)
     printf("  matrix config save    - 保存当前配置为启动默认\n");
     printf("  matrix config show    - 显示当前配置\n");
     printf("    注意: 需要SD卡挂载且包含 /sdcard/matrix.json 文件\n");
+    printf("\n色彩校正 (所有WS2812 LED适用):\n");
+    printf("  color enable         - 启用色彩校正\n");
+    printf("  color disable        - 禁用色彩校正\n");
+    printf("  color white <r> <g> <b> - 设置白点校准 (0-255)\n");
+    printf("  color gamma <value>  - 设置伽马校正 (1.0-3.0)\n");
+    printf("  color bright <value> - 设置亮度增强 (0.5-2.0)\n");
+    printf("  color sat <value>    - 设置饱和度增强 (0.5-2.0)\n");
+    printf("  color show           - 显示当前配置\n");
+    printf("  color save           - 保存配置到NVS\n");
+    printf("  color load           - 从NVS加载配置\n");
+    printf("  color reset          - 重置为默认配置\n");
     printf("\nGPIO控制:\n");
     printf("  gpio <pin> high      - 设置GPIO引脚为高电平\n");
     printf("  gpio <pin> low       - 设置GPIO引脚为低电平\n");
@@ -3223,6 +3241,194 @@ static int cmd_matrix(int argc, char **argv)
     
     if (ret != ESP_OK) {
         printf("LED矩阵控制失败: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    
+    return 0;
+}
+
+// ==================== 色彩校正命令实现 ====================
+
+static int cmd_color_correction(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: color enable|disable|white <r> <g> <b>|gamma <value>|bright <value>|sat <value>|show|save|load|reset\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "enable") == 0) {
+        esp_err_t ret = color_correction_set_enable(true);
+        if (ret == ESP_OK) {
+            printf("色彩校正已启用\n");
+            // 更新硬件LED
+            update_led_color_correction();
+        } else {
+            printf("启用色彩校正失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "disable") == 0) {
+        esp_err_t ret = color_correction_set_enable(false);
+        if (ret == ESP_OK) {
+            printf("色彩校正已禁用\n");
+            // 更新硬件LED
+            update_led_color_correction();
+        } else {
+            printf("禁用色彩校正失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "white") == 0) {
+        if (argc < 5) {
+            printf("用法: color white <r> <g> <b>\n");
+            printf("参数范围: r,g,b = 0-255\n");
+            return 1;
+        }
+        
+        int r = atoi(argv[2]);
+        int g = atoi(argv[3]);
+        int b = atoi(argv[4]);
+        
+        if (r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) {
+            printf("颜色值必须在0-255范围内\n");
+            return 1;
+        }
+        
+        white_point_t white_point = {
+            .r = (uint8_t)r,
+            .g = (uint8_t)g,
+            .b = (uint8_t)b
+        };
+        
+        esp_err_t ret = color_correction_set_white_point(&white_point);
+        if (ret == ESP_OK) {
+            printf("白点校准设置为 R:%d G:%d B:%d\n", r, g, b);
+            update_led_color_correction();
+        } else {
+            printf("设置白点校准失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "gamma") == 0) {
+        if (argc < 3) {
+            printf("用法: color gamma <value>\n");
+            printf("参数范围: 1.0-3.0\n");
+            return 1;
+        }
+        
+        float gamma = atof(argv[2]);
+        if (gamma < 1.0f || gamma > 3.0f) {
+            printf("伽马校正值必须在1.0-3.0范围内\n");
+            return 1;
+        }
+        
+        esp_err_t ret = color_correction_set_gamma(gamma);
+        if (ret == ESP_OK) {
+            printf("伽马校正设置为 %.2f\n", gamma);
+            update_led_color_correction();
+        } else {
+            printf("设置伽马校正失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "bright") == 0) {
+        if (argc < 3) {
+            printf("用法: color bright <value>\n");
+            printf("参数范围: 0.5-2.0\n");
+            return 1;
+        }
+        
+        float brightness = atof(argv[2]);
+        if (brightness < 0.5f || brightness > 2.0f) {
+            printf("亮度增强值必须在0.5-2.0范围内\n");
+            return 1;
+        }
+        
+        esp_err_t ret = color_correction_set_brightness_boost(brightness);
+        if (ret == ESP_OK) {
+            printf("亮度增强设置为 %.2f\n", brightness);
+            update_led_color_correction();
+        } else {
+            printf("设置亮度增强失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "sat") == 0) {
+        if (argc < 3) {
+            printf("用法: color sat <value>\n");
+            printf("参数范围: 0.5-2.0\n");
+            return 1;
+        }
+        
+        float saturation = atof(argv[2]);
+        if (saturation < 0.5f || saturation > 2.0f) {
+            printf("饱和度增强值必须在0.5-2.0范围内\n");
+            return 1;
+        }
+        
+        esp_err_t ret = color_correction_set_saturation_boost(saturation);
+        if (ret == ESP_OK) {
+            printf("饱和度增强设置为 %.2f\n", saturation);
+            update_led_color_correction();
+        } else {
+            printf("设置饱和度增强失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "show") == 0) {
+        color_correction_config_t config;
+        esp_err_t ret = color_correction_get_config(&config);
+        if (ret == ESP_OK) {
+            printf("色彩校正配置:\n");
+            printf("  启用状态: %s\n", config.enable_correction ? "启用" : "禁用");
+            printf("  白点校准: R:%d G:%d B:%d\n", 
+                   config.white_point.r, config.white_point.g, config.white_point.b);
+            printf("  最小白色值: R:%d G:%d B:%d\n", 
+                   config.min_white.r, config.min_white.g, config.min_white.b);
+            printf("  最大白色值: R:%d G:%d B:%d\n", 
+                   config.max_white.r, config.max_white.g, config.max_white.b);
+            printf("  伽马校正: %.2f\n", config.gamma_correction);
+            printf("  亮度增强: %.2f\n", config.brightness_boost);
+            printf("  饱和度增强: %.2f\n", config.saturation_boost);
+        } else {
+            printf("获取色彩校正配置失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "save") == 0) {
+        esp_err_t ret = color_correction_save_config();
+        if (ret == ESP_OK) {
+            printf("色彩校正配置已保存到NVS\n");
+        } else {
+            printf("保存色彩校正配置失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "load") == 0) {
+        esp_err_t ret = color_correction_load_config();
+        if (ret == ESP_OK) {
+            printf("色彩校正配置已从NVS加载\n");
+            update_led_color_correction();
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            printf("NVS中未找到色彩校正配置，使用默认配置\n");
+        } else {
+            printf("加载色彩校正配置失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "reset") == 0) {
+        esp_err_t ret = color_correction_reset_config();
+        if (ret == ESP_OK) {
+            printf("色彩校正配置已重置为默认值\n");
+            update_led_color_correction();
+        } else {
+            printf("重置色彩校正配置失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else {
+        printf("未知命令: %s\n", argv[1]);
+        printf("用法: color enable|disable|white <r> <g> <b>|gamma <value>|bright <value>|sat <value>|show|save|load|reset\n");
         return 1;
     }
     

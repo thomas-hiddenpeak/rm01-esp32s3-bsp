@@ -22,6 +22,7 @@ idf_component_register(
         ethernet_interface
         config_manager
         web_server
+        color_correction
     PRIV_REQUIRES
         driver
         sdcard_interface

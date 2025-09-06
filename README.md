@@ -9,7 +9,8 @@
 ## 🚀 主要特性
 
 - **🎛️ 硬件控制**: PWM风扇调速、WS2812 LED控制、32x32 LED矩阵、GPIO通用操作、USB MUX切换
-- **🌐 网络功能**: W5500以太网接口、DHCP服务器、网关服务、网络配置管理
+- **� 色彩校正**: WS2812 LED色彩校正系统，支持白点平衡、伽马校正、亮度和饱和度增强
+- **�🌐 网络功能**: W5500以太网接口、DHCP服务器、网关服务、网络配置管理
 - **💾 存储功能**: TF卡（MicroSD）文件系统支持，完整的文件管理操作
 - **⚡ 设备电源管理**: AGX和LPMU设备的电源控制和状态监控
 - **📊 系统监控**: 内存监控、CPU监控、温度监控、任务状态监控  
@@ -35,6 +36,12 @@
 - 内置彩虹渐变效果
 - LED矩阵支持从SD卡加载JSON动画文件
 - 配置持久化和开机自动启动
+- **🎨 WS2812色彩校正系统**:
+  - 白点平衡校正，消除LED色温偏差
+  - 伽马校正，改善视觉亮度线性度
+  - 亮度和饱和度提升，增强显示效果
+  - 配置可保存到NVS，支持启动自动加载
+  - 应用于所有WS2812 LED输出
 
 ### GPIO通用控制
 - 支持任意GPIO引脚操作
@@ -98,7 +105,7 @@
   - 文件和目录完整操作
   - 空间监控和管理
   - 格式化支持
-  - 13个专用控制台命令
+  - 19个专用控制台命令
   - POSIX文件操作兼容
 
 ## 📋 如何使用
@@ -163,6 +170,17 @@ idf.py -p [PORT] flash monitor
   - `matrix load <animation>` - 从SD卡加载动画 (如: `matrix load Logo`)
   - `matrix config save` - 保存当前矩阵配置为启动默认
   - `matrix config show` - 显示当前矩阵配置
+- `color <command>` - WS2812色彩校正控制
+  - `color enable` - 启用色彩校正
+  - `color disable` - 禁用色彩校正
+  - `color white <r> <g> <b>` - 设置白点校正 (RGB值: 0-255)
+  - `color gamma <value>` - 设置伽马校正 (范围: 0.1-5.0)
+  - `color bright <value>` - 设置亮度提升 (范围: 0.1-3.0)
+  - `color sat <value>` - 设置饱和度提升 (范围: 0.1-3.0)
+  - `color show` - 显示当前色彩校正配置
+  - `color save` - 保存配置到NVS存储
+  - `color load` - 从NVS加载配置
+  - `color reset` - 重置为默认配置
 - `gpio <pin> high|low|input` - GPIO引脚控制和读取
   - `gpio <pin> high` - 设置GPIO引脚为高电平
   - `gpio <pin> low` - 设置GPIO引脚为低电平
@@ -290,6 +308,40 @@ matrix config show              # 显示当前配置
 
 > 📖 **LED矩阵详细指南**: 请参考 `markdown/LED_MATRIX_USAGE_GUIDE.md` 获取完整的LED矩阵使用手册
 
+#### WS2812色彩校正系统
+
+色彩校正系统可以改善所有WS2812 LED的显示效果，包括板载LED、触摸LED和LED矩阵：
+
+```bash
+# 查看当前配置
+color show                      # 显示所有色彩校正参数
+
+# 基本控制
+color enable                    # 启用色彩校正
+color disable                   # 禁用色彩校正
+
+# 色彩参数调整
+color white 255 248 240         # 设置白点校正 (暖白色)
+color gamma 2.2                 # 设置伽马校正值
+color bright 1.2                # 设置亮度提升20%
+color sat 1.1                   # 设置饱和度提升10%
+
+# 配置管理
+color save                      # 保存配置到NVS
+color load                      # 从NVS重新加载配置
+color reset                     # 重置为默认配置
+```
+
+**色彩校正参数说明**：
+- **白点校正**: 消除LED色温偏差，使白色更准确
+- **伽马校正**: 改善视觉亮度线性度，让渐变更自然
+- **亮度提升**: 增强整体亮度，提高可见度
+- **饱和度提升**: 增强颜色鲜艳度，让色彩更生动
+
+> 💡 **提示**: 色彩校正设置会在系统启动时自动加载，无需重复设置
+> 
+> 📖 **色彩校正详细指南**: 请参考 `markdown/COLOR_CORRECTION_GUIDE.md` 获取完整的色彩校正使用手册
+
 #### AGX系统监控功能
 
 AGX设备系统状态监控提供两个层面的监控功能：
@@ -346,6 +398,7 @@ agx diagnose                    # 诊断AGX连接问题，提供详细网络状�
     ├── LED_MATRIX_USAGE_GUIDE.md LED矩阵控制使用指南
     ├── LED_MATRIX_IMPLEMENTATION.md LED矩阵功能实现说明
     ├── LED_MATRIX_AUTO_STARTUP.md LED矩阵自动启动功能
+    ├── COLOR_CORRECTION_GUIDE.md WS2812色彩校正系统使用指南
     └── README_COMPONENTS.md    组件说明文档
 ```
 

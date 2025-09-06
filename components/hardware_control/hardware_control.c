@@ -20,6 +20,7 @@
 #include "led_strip.h"
 #include "cJSON.h"
 #include "ethernet_interface.h"
+#include "color_correction.h"
 
 static const char *TAG = "HARDWARE_CONTROL";
 
@@ -187,7 +188,15 @@ esp_err_t board_led_set_color(led_color_t color)
 
     s_hardware_status.board_led_color = color;
     
-    esp_err_t ret = apply_led_color(s_board_led_strip, color, 
+    // 应用色彩校正
+    led_color_t corrected_color;
+    esp_err_t correction_ret = apply_color_correction_to_led(color, &corrected_color);
+    if (correction_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Color correction failed for board LED, using original color");
+        corrected_color = color;
+    }
+    
+    esp_err_t ret = apply_led_color(s_board_led_strip, corrected_color, 
                                    s_hardware_status.board_led_brightness, 
                                    BOARD_WS2812_NUM);
     if (ret != ESP_OK) {
@@ -195,7 +204,9 @@ esp_err_t board_led_set_color(led_color_t color)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Board LED color set to R:%d G:%d B:%d", color.red, color.green, color.blue);
+    ESP_LOGI(TAG, "Board LED color set to R:%d G:%d B:%d (corrected: R:%d G:%d B:%d)", 
+             color.red, color.green, color.blue,
+             corrected_color.red, corrected_color.green, corrected_color.blue);
     return ESP_OK;
 }
 
@@ -287,7 +298,15 @@ esp_err_t touch_led_set_color(led_color_t color)
 
     s_hardware_status.touch_led_color = color;
     
-    esp_err_t ret = apply_led_color(s_touch_led_strip, color, 
+    // 应用色彩校正
+    led_color_t corrected_color;
+    esp_err_t correction_ret = apply_color_correction_to_led(color, &corrected_color);
+    if (correction_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Color correction failed for touch LED, using original color");
+        corrected_color = color;
+    }
+    
+    esp_err_t ret = apply_led_color(s_touch_led_strip, corrected_color, 
                                    s_hardware_status.touch_led_brightness, 
                                    TOUCH_WS2812_NUM);
     if (ret != ESP_OK) {
@@ -295,7 +314,9 @@ esp_err_t touch_led_set_color(led_color_t color)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Touch LED color set to R:%d G:%d B:%d", color.red, color.green, color.blue);
+    ESP_LOGI(TAG, "Touch LED color set to R:%d G:%d B:%d (corrected: R:%d G:%d B:%d)", 
+             color.red, color.green, color.blue,
+             corrected_color.red, corrected_color.green, corrected_color.blue);
     return ESP_OK;
 }
 
@@ -1513,9 +1534,18 @@ static esp_err_t led_matrix_apply_buffer(void)
     }
 
     for (int i = 0; i < LED_MATRIX_NUM; i++) {
-        uint8_t r = (s_matrix_buffer[i].red * s_matrix_brightness) / 100;
-        uint8_t g = (s_matrix_buffer[i].green * s_matrix_brightness) / 100;
-        uint8_t b = (s_matrix_buffer[i].blue * s_matrix_brightness) / 100;
+        // 应用色彩校正
+        led_color_t corrected_color;
+        esp_err_t correction_ret = apply_color_correction_to_led(s_matrix_buffer[i], &corrected_color);
+        if (correction_ret != ESP_OK) {
+            // 如果色彩校正失败，使用原始颜色
+            corrected_color = s_matrix_buffer[i];
+        }
+        
+        // 应用亮度调整
+        uint8_t r = (corrected_color.red * s_matrix_brightness) / 100;
+        uint8_t g = (corrected_color.green * s_matrix_brightness) / 100;
+        uint8_t b = (corrected_color.blue * s_matrix_brightness) / 100;
         
         esp_err_t ret = led_strip_set_pixel(s_matrix_led_strip, i, r, g, b);
         if (ret != ESP_OK) {
@@ -1542,10 +1572,18 @@ esp_err_t led_matrix_set_pixel(uint8_t x, uint8_t y, led_color_t color)
     // 保存原始颜色到缓冲区
     s_matrix_buffer[index] = color;
     
+    // 应用色彩校正
+    led_color_t corrected_color;
+    esp_err_t correction_ret = apply_color_correction_to_led(color, &corrected_color);
+    if (correction_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Color correction failed for pixel (%d,%d), using original color", x, y);
+        corrected_color = color;
+    }
+    
     // 应用亮度调整并设置到LED strip
-    uint8_t r = (color.red * s_matrix_brightness) / 100;
-    uint8_t g = (color.green * s_matrix_brightness) / 100;
-    uint8_t b = (color.blue * s_matrix_brightness) / 100;
+    uint8_t r = (corrected_color.red * s_matrix_brightness) / 100;
+    uint8_t g = (corrected_color.green * s_matrix_brightness) / 100;
+    uint8_t b = (corrected_color.blue * s_matrix_brightness) / 100;
 
     return led_strip_set_pixel(s_matrix_led_strip, index, r, g, b);
 }
@@ -2361,5 +2399,109 @@ esp_err_t agx_diagnose_connection(void)
     
     printf("================\n\n");
     
+    return ESP_OK;
+}
+
+// ==================== 色彩校正接口实现 ====================
+
+esp_err_t color_correction_init_hardware(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = color_correction_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize color correction: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Color correction system initialized for hardware control");
+    return ESP_OK;
+}
+
+esp_err_t apply_color_correction_to_led(led_color_t input_color, led_color_t *output_color)
+{
+    if (output_color == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    rgb_color_t corrected;
+    esp_err_t ret = color_correction_apply(input_color.red, input_color.green, input_color.blue, &corrected);
+    if (ret != ESP_OK) {
+        // 如果校正失败，返回原始颜色
+        *output_color = input_color;
+        return ret;
+    }
+
+    output_color->red = corrected.r;
+    output_color->green = corrected.g;
+    output_color->blue = corrected.b;
+
+    return ESP_OK;
+}
+
+esp_err_t led_set_pixel_with_correction(led_strip_handle_t strip, uint32_t index, 
+                                        led_color_t color, uint8_t brightness)
+{
+    if (strip == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 应用色彩校正
+    led_color_t corrected_color;
+    esp_err_t ret = apply_color_correction_to_led(color, &corrected_color);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Color correction failed, using original color");
+        corrected_color = color;
+    }
+
+    // 应用亮度调整
+    uint8_t final_r = (corrected_color.red * brightness) / 100;
+    uint8_t final_g = (corrected_color.green * brightness) / 100;
+    uint8_t final_b = (corrected_color.blue * brightness) / 100;
+
+    return led_strip_set_pixel(strip, index, final_r, final_g, final_b);
+}
+
+esp_err_t update_led_color_correction(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Hardware control not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Updating LED color correction configuration...");
+
+    // 重新应用当前的LED矩阵缓冲区（如果有内容的话）
+    if (s_matrix_led_strip != NULL) {
+        esp_err_t ret = led_matrix_apply_buffer();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to update matrix color correction: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
+
+    // 重新应用当前的板载LED和触摸LED颜色
+    if (s_board_led_strip != NULL) {
+        led_color_t corrected_color;
+        esp_err_t ret = apply_color_correction_to_led(s_hardware_status.board_led_color, &corrected_color);
+        if (ret == ESP_OK) {
+            apply_led_color(s_board_led_strip, corrected_color, 
+                           s_hardware_status.board_led_brightness, BOARD_WS2812_NUM);
+        }
+    }
+
+    if (s_touch_led_strip != NULL) {
+        led_color_t corrected_color;
+        esp_err_t ret = apply_color_correction_to_led(s_hardware_status.touch_led_color, &corrected_color);
+        if (ret == ESP_OK) {
+            apply_led_color(s_touch_led_strip, corrected_color, 
+                           s_hardware_status.touch_led_brightness, TOUCH_WS2812_NUM);
+        }
+    }
+
+    ESP_LOGI(TAG, "LED color correction updated successfully");
     return ESP_OK;
 }

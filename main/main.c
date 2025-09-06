@@ -22,6 +22,7 @@
 #include "console_ping.h"
 #include "sdcard_interface.h"
 #include "web_server.h"
+#include "color_correction.h"
 
 static const char *TAG = "ESP32S3_MAIN";
 
@@ -99,6 +100,14 @@ void app_main(void)
         ESP_LOGE(TAG, "设备接口初始化失败: %s", esp_err_to_name(ret));
     } else {
         ESP_LOGI(TAG, "设备接口初始化成功");
+    }
+
+    // 4.1 初始化色彩校正系统
+    ret = color_correction_init_hardware();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "色彩校正系统初始化失败: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "色彩校正系统初始化成功");
     }
 
     // 5. 注册设备事件回调

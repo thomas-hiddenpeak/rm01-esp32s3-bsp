@@ -41,6 +41,25 @@ typedef struct {
 } fan_config_t;
 
 /**
+ * @brief LED color correction configuration structure
+ */
+typedef struct {
+    bool enable_correction;             ///< Enable color correction
+    uint8_t white_point_r;              ///< White point reference R value
+    uint8_t white_point_g;              ///< White point reference G value  
+    uint8_t white_point_b;              ///< White point reference B value
+    uint8_t min_white_r;                ///< Minimum white R value
+    uint8_t min_white_g;                ///< Minimum white G value
+    uint8_t min_white_b;                ///< Minimum white B value
+    uint8_t max_white_r;                ///< Maximum white R value
+    uint8_t max_white_g;                ///< Maximum white G value
+    uint8_t max_white_b;                ///< Maximum white B value
+    float gamma_correction;             ///< Gamma correction value
+    float brightness_boost;             ///< Brightness boost factor
+    float saturation_boost;             ///< Saturation boost factor
+} led_color_correction_config_t;
+
+/**
  * @brief LED configuration structure
  */
 typedef struct {
@@ -55,6 +74,9 @@ typedef struct {
     uint8_t matrix_brightness;          ///< Matrix default brightness (0-100)
     char matrix_startup_animation[64];  ///< Startup animation name
     bool matrix_enable;                 ///< Enable matrix display
+    
+    // 色彩校正配置
+    led_color_correction_config_t color_correction;  ///< Color correction settings
 } led_config_t;
 
 /**
@@ -140,6 +162,25 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
 }
 
 /**
+ * @brief Default LED color correction configuration
+ */
+#define DEFAULT_LED_COLOR_CORRECTION_CONFIG() { \
+    .enable_correction = true, \
+    .white_point_r = 42, \
+    .white_point_g = 28, \
+    .white_point_b = 19, \
+    .min_white_r = 5, \
+    .min_white_g = 4, \
+    .min_white_b = 3, \
+    .max_white_r = 168, \
+    .max_white_g = 112, \
+    .max_white_b = 76, \
+    .gamma_correction = 2.2f, \
+    .brightness_boost = 1.15f, \
+    .saturation_boost = 1.520875f \
+}
+
+/**
  * @brief Default LED configuration
  */
 #define DEFAULT_LED_CONFIG() { \
@@ -151,7 +192,8 @@ typedef void (*config_event_callback_t)(config_event_t event, const char *messag
     .matrix_auto_start = true, \
     .matrix_brightness = 30, \
     .matrix_startup_animation = "Logo", \
-    .matrix_enable = true \
+    .matrix_enable = true, \
+    .color_correction = DEFAULT_LED_COLOR_CORRECTION_CONFIG() \
 }
 
 /**
@@ -468,6 +510,64 @@ esp_err_t config_manager_get_matrix_config(uint8_t *brightness,
                                            char *animation_name,
                                            bool *auto_start,
                                            bool *enable);
+
+/**
+ * @brief Set LED color correction configuration
+ * 
+ * @param config Color correction configuration structure
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_color_correction_config(const led_color_correction_config_t *config);
+
+/**
+ * @brief Get LED color correction configuration
+ * 
+ * @param config Output color correction configuration structure
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_get_color_correction_config(led_color_correction_config_t *config);
+
+/**
+ * @brief Set color correction white point
+ * 
+ * @param white_r White point red value (0-255)
+ * @param white_g White point green value (0-255)
+ * @param white_b White point blue value (0-255)
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_color_correction_white_point(uint8_t white_r, uint8_t white_g, uint8_t white_b);
+
+/**
+ * @brief Set color correction gamma value
+ * 
+ * @param gamma Gamma correction value (1.0-3.0)
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_color_correction_gamma(float gamma);
+
+/**
+ * @brief Set color correction brightness boost
+ * 
+ * @param boost Brightness boost factor (0.5-2.0)
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_color_correction_brightness_boost(float boost);
+
+/**
+ * @brief Set color correction saturation boost
+ * 
+ * @param boost Saturation boost factor (0.5-2.0)
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_color_correction_saturation_boost(float boost);
+
+/**
+ * @brief Enable or disable color correction
+ * 
+ * @param enable True to enable, false to disable
+ * @return esp_err_t ESP_OK on success, error code otherwise
+ */
+esp_err_t config_manager_set_color_correction_enable(bool enable);
 
 /**
  * @brief Set USB MUX default target

@@ -424,6 +424,52 @@ esp_err_t led_matrix_load_animation(const char *animation_name);
  */
 esp_err_t led_matrix_test_pattern(void);
 
+// ==================== 色彩校正接口 ====================
+
+/**
+ * @brief 初始化色彩校正系统
+ * 
+ * @return
+ *     - ESP_OK: 初始化成功
+ *     - ESP_FAIL: 初始化失败
+ */
+esp_err_t color_correction_init_hardware(void);
+
+/**
+ * @brief 应用色彩校正到LED颜色
+ * 
+ * @param input_color 输入颜色
+ * @param output_color 输出校正后的颜色
+ * @return
+ *     - ESP_OK: 校正成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ *     - ESP_ERR_INVALID_STATE: 未初始化
+ */
+esp_err_t apply_color_correction_to_led(led_color_t input_color, led_color_t *output_color);
+
+/**
+ * @brief 设置LED像素颜色（带色彩校正）
+ * 
+ * @param strip LED条带句柄
+ * @param index LED索引
+ * @param color 原始颜色
+ * @param brightness 亮度 (0-100)
+ * @return
+ *     - ESP_OK: 设置成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ */
+esp_err_t led_set_pixel_with_correction(led_strip_handle_t strip, uint32_t index, 
+                                        led_color_t color, uint8_t brightness);
+
+/**
+ * @brief 更新所有LED的色彩校正配置
+ * 
+ * @return
+ *     - ESP_OK: 更新成功
+ *     - ESP_ERR_INVALID_STATE: 未初始化
+ */
+esp_err_t update_led_color_correction(void);
+
 // ==================== GPIO控制接口 ====================
 
 /**

@@ -1090,3 +1090,132 @@ static esp_err_t apply_web_server_config(const web_server_config_t *config)
     
     return ESP_OK;
 }
+
+// ==================== Color Correction Configuration Functions ====================
+
+esp_err_t config_manager_set_color_correction_config(const led_color_correction_config_t *config)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!config) {
+        ESP_LOGE(TAG, "Invalid color correction config pointer");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Validate gamma correction range
+    if (config->gamma_correction <= 0.0f || config->gamma_correction > 5.0f) {
+        ESP_LOGE(TAG, "Invalid gamma correction value: %.2f (must be 0.0-5.0)", config->gamma_correction);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Validate boost values
+    if (config->brightness_boost <= 0.0f || config->brightness_boost > 3.0f ||
+        config->saturation_boost <= 0.0f || config->saturation_boost > 3.0f) {
+        ESP_LOGE(TAG, "Invalid boost values (must be 0.0-3.0)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.led.color_correction = *config;
+    ESP_LOGI(TAG, "Color correction config updated: enable=%s, gamma=%.2f, brightness=%.2f, saturation=%.2f",
+             config->enable_correction ? "true" : "false",
+             config->gamma_correction, config->brightness_boost, config->saturation_boost);
+
+    return ESP_OK;
+}
+
+esp_err_t config_manager_get_color_correction_config(led_color_correction_config_t *config)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!config) {
+        ESP_LOGE(TAG, "Invalid config pointer");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *config = s_current_config.led.color_correction;
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_color_correction_white_point(uint8_t white_r, uint8_t white_g, uint8_t white_b)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_current_config.led.color_correction.white_point_r = white_r;
+    s_current_config.led.color_correction.white_point_g = white_g;
+    s_current_config.led.color_correction.white_point_b = white_b;
+
+    ESP_LOGI(TAG, "Color correction white point set to R:%d G:%d B:%d", white_r, white_g, white_b);
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_color_correction_gamma(float gamma)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (gamma <= 0.0f || gamma > 5.0f) {
+        ESP_LOGE(TAG, "Invalid gamma correction value: %.2f (must be 0.0-5.0)", gamma);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.led.color_correction.gamma_correction = gamma;
+    ESP_LOGI(TAG, "Color correction gamma set to %.2f", gamma);
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_color_correction_brightness_boost(float boost)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (boost <= 0.0f || boost > 3.0f) {
+        ESP_LOGE(TAG, "Invalid brightness boost value: %.2f (must be 0.0-3.0)", boost);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.led.color_correction.brightness_boost = boost;
+    ESP_LOGI(TAG, "Color correction brightness boost set to %.2f", boost);
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_color_correction_saturation_boost(float boost)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (boost <= 0.0f || boost > 3.0f) {
+        ESP_LOGE(TAG, "Invalid saturation boost value: %.2f (must be 0.0-3.0)", boost);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_current_config.led.color_correction.saturation_boost = boost;
+    ESP_LOGI(TAG, "Color correction saturation boost set to %.2f", boost);
+    return ESP_OK;
+}
+
+esp_err_t config_manager_set_color_correction_enable(bool enable)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Configuration manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_current_config.led.color_correction.enable_correction = enable;
+    ESP_LOGI(TAG, "Color correction %s", enable ? "enabled" : "disabled");
+    return ESP_OK;
+}
