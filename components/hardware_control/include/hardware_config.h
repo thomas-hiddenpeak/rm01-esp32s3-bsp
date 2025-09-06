@@ -32,6 +32,13 @@
 #define MONITOR_INTERVAL_MS 10000   // 监控间隔(毫秒)
 #define LOW_MEMORY_THRESHOLD 10000  // 低内存警告阈值(字节)
 
+// 电源监控配置
+#define POWER_SUPPLY_VOLTAGE_PIN    18      // 供电电压监测引脚 (GPIO18 -> ADC2_CHANNEL_7)
+#define POWER_CHIP_UART_RX_PIN      47      // 电源诱骗芯片UART接收引脚 (GPIO47)
+#define POWER_CHIP_UART_NUM         UART_NUM_1  // 电源芯片UART端口
+#define POWER_CHIP_UART_BAUDRATE    9600    // UART波特率 (电源芯片规格)
+#define POWER_CHIP_UART_BUF_SIZE    1024    // UART缓冲区大小
+
 // ==================== 默认值配置 ====================
 
 // 风扇默认参数
@@ -106,6 +113,18 @@
 #define AGX_RESET_PULSE_MS     1000    // AGX重启脉冲持续时间(毫秒)
 #define LPMU_POWER_PULSE_MS     300     // LPMU电源按钮脉冲持续时间(毫秒)
 #define LPMU_RESET_PULSE_MS     300     // LPMU重启脉冲持续时间(毫秒)
+
+// 电源监控配置 (重复定义，保持一致)
+#define POWER_SUPPLY_VOLTAGE_PIN    18      // 供电电压监测引脚 (GPIO18 -> ADC2_CHANNEL_7)
+#define POWER_CHIP_UART_RX_PIN      47      // 电源诱骗芯片UART接收引脚 (GPIO47)
+#define POWER_CHIP_UART_NUM         UART_NUM_1  // 电源芯片UART端口
+#define POWER_CHIP_UART_BAUDRATE    9600    // UART波特率 (电源芯片规格)
+#define POWER_CHIP_UART_BUF_SIZE    1024    // UART缓冲区大小
+
+// 电压监控配置
+#define VOLTAGE_SAMPLE_COUNT         10            // 电压采样次数
+#define VOLTAGE_MONITOR_INTERVAL_MS  5000          // 电压监控间隔(毫秒)
+#define VOLTAGE_CHANGE_THRESHOLD     1.0           // 电压变化阈值(V) - 调整为1V减少干扰误触发
 
 // 颜色预定义
 #define COLOR_RED           {255, 0, 0}

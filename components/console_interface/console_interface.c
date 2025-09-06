@@ -18,11 +18,13 @@
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_timer.h"
+#include "driver/uart.h"
 #include "linenoise/linenoise.h"
 #include "argtable3/argtable3.h"
 
 // 引入设备组件
 #include "device_interface.h"
+#include "hardware_config.h"
 #include "hardware_control.h"
 #include "system_monitor.h"
 #include "ethernet_interface.h"
@@ -65,6 +67,7 @@ static int cmd_gpio(int argc, char **argv);
 static int cmd_usbmux(int argc, char **argv);
 static int cmd_agx(int argc, char **argv);
 static int cmd_lpmu(int argc, char **argv);
+static int cmd_power(int argc, char **argv);
 static int cmd_test(int argc, char **argv);
 static int cmd_save(int argc, char **argv);
 static int cmd_load(int argc, char **argv);
@@ -275,6 +278,11 @@ esp_err_t console_interface_register_device_commands(void)
             .command = "lpmu",
             .help = "LPMU电源控制: lpmu toggle|reset|status",
             .func = &cmd_lpmu,
+        },
+        {
+            .command = "power",
+            .help = "电源监控: power status|voltage|read|debug|test|analyze|help (详细帮助请使用 power help)",
+            .func = &cmd_power,
         },
         {
             .command = "test",
@@ -3432,5 +3440,233 @@ static int cmd_color_correction(int argc, char **argv)
         return 1;
     }
     
+    return 0;
+}
+
+static int cmd_power(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("用法: power status|voltage|read|chip|start|stop|threshold <value>|debug|test|analyze|help\n");
+        printf("使用 'power help' 获取详细帮助信息\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "status") == 0) {
+        esp_err_t ret = power_print_status();
+        if (ret != ESP_OK) {
+            printf("打印电源状态失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "help") == 0) {
+        printf("==================== 电源监控命令帮助 ====================\n");
+        printf("\n");
+        printf("基本命令:\n");
+        printf("  power status                   - 显示完整电源系统状态\n");
+        printf("  power voltage                  - 读取供电电压 (GPIO18 ADC)\n");
+        printf("  power read [timeout_ms]        - 读取电源芯片数据 (GPIO47 UART)\n");
+        printf("  power chip [timeout_ms]        - 同read命令，读取电源芯片数据\n");
+        printf("\n");
+        printf("监控控制:\n");
+        printf("  power start                    - 启动后台电源监控任务\n");
+        printf("  power stop                     - 停止后台电源监控任务\n");
+        printf("  power threshold <value>        - 设置电压变化阈值 (单位:V)\n");
+        printf("    说明: 当供电电压变化超过阈值时，自动触发电源芯片数据读取\n");
+        printf("    默认: 1.0V，推荐范围: 0.5V-2.0V (较大值可减少干扰误触发)\n");
+        printf("\n");
+        printf("调试工具:\n");
+        printf("  power debug                    - 显示UART配置和状态信息\n");
+        printf("  power test                     - 执行10秒UART接收测试\n");
+        printf("  power analyze [timeout_ms]     - 深度分析UART数据协议\n");
+        printf("  power help                     - 显示此帮助信息\n");
+        printf("\n");
+        printf("使用示例:\n");
+        printf("  power voltage                  - 读取GPIO18供电电压\n");
+        printf("  power read                     - 使用默认2秒超时读取芯片数据\n");
+        printf("  power read 5000                - 使用5秒超时读取芯片数据\n");
+        printf("  power threshold 0.1            - 设置0.1V电压变化阈值\n");
+        printf("  power debug                    - 检查UART初始化状态\n");
+        printf("  power analyze 10000            - 执行10秒数据协议分析\n");
+        printf("\n");
+        printf("硬件配置:\n");
+        printf("  GPIO18: 供电电压监测 (ADC2_CHANNEL_7, 分压比11.4:1)\n");
+        printf("  GPIO47: 电源芯片UART接收 (9600波特率, 8N1)\n");
+        printf("  数据格式: [0xFF帧头][电压][电流][CRC] (4字节)\n");
+        printf("========================================================\n");
+    }
+    else if (strcmp(argv[1], "debug") == 0) {
+        // 显示UART调试信息
+        printf("==================== UART调试信息 ====================\n");
+        printf("UART端口: UART_NUM_%d\n", POWER_CHIP_UART_NUM);
+        printf("RX引脚: GPIO%d\n", POWER_CHIP_UART_RX_PIN);
+        printf("波特率: %d\n", POWER_CHIP_UART_BAUDRATE);
+        
+        // 检查缓冲区中是否有数据
+        size_t buffered_size;
+        if (uart_get_buffered_data_len(POWER_CHIP_UART_NUM, &buffered_size) == ESP_OK) {
+            printf("缓冲区数据: %d bytes\n", buffered_size);
+        } else {
+            printf("缓冲区数据: 无法读取(UART可能未初始化)\n");
+        }
+        
+        printf("UART初始化状态: %s\n", power_get_uart_status() ? "已初始化" : "未初始化");
+        printf("================================================\n");
+        
+        // 尝试读取一些原始数据
+        if (power_get_uart_status()) {
+            printf("尝试读取原始UART数据(1秒)...\n");
+            uint8_t raw_data[64];
+            int len = uart_read_bytes(POWER_CHIP_UART_NUM, raw_data, sizeof(raw_data), pdMS_TO_TICKS(1000));
+            if (len > 0) {
+                printf("接收到 %d bytes 原始数据:\n", len);
+                for (int i = 0; i < len; i++) {
+                    printf("0x%02X ", raw_data[i]);
+                    if ((i + 1) % 16 == 0) printf("\n");
+                }
+                if (len % 16 != 0) printf("\n");
+            } else {
+                printf("1秒内未接收到数据\n");
+            }
+        }
+    }
+    else if (strcmp(argv[1], "test") == 0) {
+        printf("==================== UART简单测试 ====================\n");
+        if (!power_get_uart_status()) {
+            printf("UART未初始化\n");
+            return 1;
+        }
+        
+        printf("UART配置: GPIO%d, %d波特率\n", POWER_CHIP_UART_RX_PIN, POWER_CHIP_UART_BAUDRATE);
+        printf("等待10秒接收任何数据...\n");
+        
+        uint8_t buffer[128];
+        int total_bytes = 0;
+        
+        for (int i = 0; i < 10; i++) {
+            size_t available;
+            uart_get_buffered_data_len(POWER_CHIP_UART_NUM, &available);
+            
+            if (available > 0) {
+                int len = uart_read_bytes(POWER_CHIP_UART_NUM, buffer, sizeof(buffer), 0);
+                if (len > 0) {
+                    total_bytes += len;
+                    printf("第%d秒: 接收到%d字节\n", i+1, len);
+                    printf("HEX: ");
+                    for (int j = 0; j < len && j < 16; j++) {
+                        printf("%02X ", buffer[j]);
+                    }
+                    printf("\n");
+                }
+            } else {
+                printf("第%d秒: 无数据\n", i+1);
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        
+        printf("测试完成，共接收%d字节\n", total_bytes);
+        printf("=================================================\n");
+    }
+    else if (strcmp(argv[1], "analyze") == 0) {
+        uint32_t timeout_ms = 5000; // 默认5秒分析
+        if (argc >= 3) {
+            timeout_ms = atoi(argv[2]);
+            if (timeout_ms == 0) {
+                timeout_ms = 5000;
+            }
+        }
+        
+        esp_err_t ret = power_analyze_uart_data(timeout_ms);
+        if (ret != ESP_OK) {
+            printf("数据分析失败: %s\n", esp_err_to_name(ret));
+        }
+    }
+    else if (strcmp(argv[1], "voltage") == 0) {
+        float supply_voltage = power_get_supply_voltage();
+        
+        printf("==================== 电压监控 ====================\n");
+        printf("供电电压 (GPIO18): %.2fV\n", supply_voltage);
+        printf("=================================================\n");
+    }
+    else if (strcmp(argv[1], "read") == 0 || strcmp(argv[1], "chip") == 0) {
+        uint32_t timeout_ms = 2000; // 默认2秒超时
+        if (argc >= 3) {
+            timeout_ms = atoi(argv[2]);
+            if (timeout_ms == 0) {
+                timeout_ms = 2000;
+            }
+        }
+
+        printf("读取电源芯片数据 (超时: %lu ms)...\n", timeout_ms);
+        esp_err_t ret = power_chip_read_data(timeout_ms);
+        
+        if (ret == ESP_OK) {
+            power_chip_data_t data;
+            ret = power_get_chip_data(&data);
+            if (ret == ESP_OK) {
+                printf("==================== 电源芯片数据 ====================\n");
+                printf("电压: %.2fV\n", data.voltage);
+                printf("电流: %.3fA\n", data.current);
+                printf("功率: %.2fW\n", data.power);
+                uint32_t age_ms = esp_log_timestamp() - data.timestamp;
+                printf("数据年龄: %lu 毫秒\n", age_ms);
+                printf("===================================================\n");
+            } else {
+                printf("获取芯片数据失败: %s\n", esp_err_to_name(ret));
+                return 1;
+            }
+        } else if (ret == ESP_ERR_TIMEOUT) {
+            printf("读取超时 - 请检查电源芯片连接\n");
+            return 1;
+        } else {
+            printf("读取失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "start") == 0) {
+        esp_err_t ret = power_monitor_start_task();
+        if (ret == ESP_OK) {
+            printf("电源监控任务已启动\n");
+        } else {
+            printf("启动电源监控任务失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "stop") == 0) {
+        esp_err_t ret = power_monitor_stop_task();
+        if (ret == ESP_OK) {
+            printf("电源监控任务已停止\n");
+        } else {
+            printf("停止电源监控任务失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "threshold") == 0) {
+        if (argc < 3) {
+            printf("用法: power threshold <value>\n");
+            printf("示例: power threshold 0.1  (设置电压变化阈值为0.1V)\n");
+            return 1;
+        }
+
+        float threshold = atof(argv[2]);
+        if (threshold <= 0) {
+            printf("阈值必须大于0\n");
+            return 1;
+        }
+
+        esp_err_t ret = power_set_voltage_threshold(threshold);
+        if (ret == ESP_OK) {
+            printf("电压变化阈值已设置为: %.2fV\n", threshold);
+        } else {
+            printf("设置阈值失败: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+    }
+    else {
+        printf("未知命令: %s\n", argv[1]);
+        printf("用法: power status|voltage|read|chip|start|stop|threshold <value>|debug|test|analyze|help\n");
+        printf("使用 'power help' 获取详细帮助信息\n");
+        return 1;
+    }
+
     return 0;
 }

@@ -109,6 +109,25 @@ typedef enum {
 } power_state_t;
 
 /**
+ * @brief 电源芯片数据结构
+ */
+typedef struct {
+    bool valid;                 ///< 数据有效性
+    float voltage;              ///< 电压 (V)
+    float current;              ///< 电流 (A)
+    float power;                ///< 功率 (W)
+    uint32_t timestamp;         ///< 数据时间戳 (毫秒)
+} power_chip_data_t;
+
+/**
+ * @brief 电压监控数据结构
+ */
+typedef struct {
+    float supply_voltage;       ///< 供电电压 (V)
+    uint32_t timestamp;         ///< 数据时间戳 (毫秒)
+} voltage_monitor_data_t;
+
+/**
  * @brief AGX网络状态枚举
  */
 typedef enum {
@@ -159,6 +178,8 @@ typedef struct {
     power_state_t agx_power_state;     ///< AGX电源状态
     power_state_t lpmu_power_state;     ///< LPMU电源状态
     agx_monitor_status_t agx_monitor;   ///< AGX系统监控状态
+    power_chip_data_t power_chip_data;  ///< 电源芯片数据
+    voltage_monitor_data_t voltage_data; ///< 电压监控数据
 } hardware_status_t;
 
 // ==================== 初始化接口 ====================
@@ -854,6 +875,128 @@ esp_err_t agx_diagnose_connection(void);
  *     - ESP_FAIL: 端口连接失败
  */
 esp_err_t agx_test_port(uint16_t port);
+
+// ==================== 电源监控接口 ====================
+
+/**
+ * @brief 初始化电源监控功能
+ * 
+ * @return
+ *     - ESP_OK: 初始化成功
+ *     - ESP_FAIL: 初始化失败
+ */
+esp_err_t power_monitor_init(void);
+
+/**
+ * @brief 反初始化电源监控功能
+ * 
+ * @return
+ *     - ESP_OK: 反初始化成功
+ */
+esp_err_t power_monitor_deinit(void);
+
+/**
+ * @brief 读取供电电压
+ * 
+ * @return 供电电压值 (V)，失败返回0.0
+ */
+float power_get_supply_voltage(void);
+
+/**
+ * @brief 从UART读取电源芯片协商数据
+ * 
+ * @param timeout_ms 超时时间 (毫秒)
+ * @return
+ *     - ESP_OK: 读取成功
+ *     - ESP_ERR_TIMEOUT: 读取超时
+ *     - ESP_FAIL: 读取失败
+ */
+esp_err_t power_chip_read_data(uint32_t timeout_ms);
+
+/**
+ * @brief 分析UART原始数据以诊断协议类型
+ * 
+ * @param timeout_ms 监控时间（毫秒）
+ * @return
+ *     - ESP_OK: 分析完成
+ *     - ESP_ERR_TIMEOUT: 未接收到数据
+ *     - ESP_ERR_INVALID_STATE: UART未初始化
+ */
+esp_err_t power_analyze_uart_data(uint32_t timeout_ms);
+
+/**
+ * @brief 获取最新的电源芯片数据
+ * 
+ * @param data 存储电源芯片数据的指针
+ * @return
+ *     - ESP_OK: 获取成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ *     - ESP_ERR_NOT_FOUND: 没有有效数据
+ */
+esp_err_t power_get_chip_data(power_chip_data_t *data);
+
+/**
+ * @brief 获取电压监控数据
+ * 
+ * @param data 存储电压监控数据的指针
+ * @return
+ *     - ESP_OK: 获取成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ */
+esp_err_t power_get_voltage_data(voltage_monitor_data_t *data);
+
+/**
+ * @brief 启动电源监控任务
+ * 
+ * @return
+ *     - ESP_OK: 启动成功
+ *     - ESP_FAIL: 启动失败
+ */
+esp_err_t power_monitor_start_task(void);
+
+/**
+ * @brief 停止电源监控任务
+ * 
+ * @return
+ *     - ESP_OK: 停止成功
+ */
+esp_err_t power_monitor_stop_task(void);
+
+/**
+ * @brief 检查电压变化
+ * 
+ * @return
+ *     - true: 电压发生变化
+ *     - false: 电压没有变化
+ */
+bool power_check_voltage_change(void);
+
+/**
+ * @brief 设置电压变化阈值
+ * 
+ * @param threshold 阈值 (V)
+ * @return
+ *     - ESP_OK: 设置成功
+ *     - ESP_ERR_INVALID_ARG: 参数无效
+ */
+esp_err_t power_set_voltage_threshold(float threshold);
+
+/**
+ * @brief 打印电源监控状态
+ * 
+ * @return
+ *     - ESP_OK: 打印成功
+ */
+esp_err_t power_print_status(void);
+
+/**
+ * @brief 获取电源UART初始化状态
+ * 
+ * @return
+ *     - true: UART已初始化
+ *     - false: UART未初始化
+ */
+bool power_get_uart_status(void);
 
 #ifdef __cplusplus
 }

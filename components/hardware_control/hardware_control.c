@@ -10,10 +10,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "driver/uart.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_timer.h"
@@ -21,6 +26,7 @@
 #include "cJSON.h"
 #include "ethernet_interface.h"
 #include "color_correction.h"
+#include "hardware_config.h"
 
 static const char *TAG = "HARDWARE_CONTROL";
 
@@ -34,6 +40,15 @@ static led_strip_handle_t s_matrix_led_strip = NULL;
 static uint8_t s_matrix_brightness = DEFAULT_LED_BRIGHTNESS;
 static led_color_t s_matrix_buffer[LED_MATRIX_NUM]; // 添加矩阵缓冲区
 
+// 电源监控相关变量
+static adc_oneshot_unit_handle_t s_adc2_handle = NULL;
+static adc_cali_handle_t s_adc2_cali_handle = NULL;
+static bool s_power_monitor_initialized = false;
+static bool s_power_uart_initialized = false;
+static TaskHandle_t s_power_monitor_task_handle = NULL;
+static float s_voltage_threshold = VOLTAGE_CHANGE_THRESHOLD;
+static float s_last_supply_voltage = 0.0;
+
 // ==================== 静态函数声明 ====================
 
 static esp_err_t init_fan_pwm(void);
@@ -43,6 +58,15 @@ static esp_err_t init_power_control_gpio(void);
 static esp_err_t disable_jtag_for_gpio40(void);
 static esp_err_t apply_led_color(led_strip_handle_t strip, led_color_t color, uint8_t brightness, uint8_t num_leds);
 static void hsv_to_rgb(int hue, int saturation, int value, uint8_t *r, uint8_t *g, uint8_t *b);
+
+// 电源监控相关静态函数声明
+static esp_err_t init_power_monitor_adc(void);
+static esp_err_t init_power_chip_uart(void);
+static esp_err_t deinit_power_monitor_adc(void);
+static esp_err_t deinit_power_chip_uart(void);
+static void power_monitor_task(void *pvParameters);
+static esp_err_t parse_power_chip_data(const uint8_t *raw_data, size_t data_len, power_chip_data_t *data);
+static uint8_t calculate_crc8(const uint8_t *data, size_t length);
 
 // ==================== 初始化接口实现 ====================
 
@@ -95,6 +119,13 @@ esp_err_t hardware_control_init(void)
         return ret;
     }
 
+    // 初始化电源监控功能
+    ret = power_monitor_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize power monitor: %s", esp_err_to_name(ret));
+        // 电源监控失败不影响整个系统的初始化，只记录警告
+    }
+
     s_initialized = true;
     s_hardware_status.initialized = true;
     
@@ -115,6 +146,9 @@ esp_err_t hardware_control_deinit(void)
     fan_stop();
     board_led_turn_off();
     touch_led_turn_off();
+
+    // 反初始化电源监控功能
+    power_monitor_deinit();
 
     // 释放LED strip资源
     if (s_board_led_strip) {
@@ -2503,5 +2537,668 @@ esp_err_t update_led_color_correction(void)
     }
 
     ESP_LOGI(TAG, "LED color correction updated successfully");
+    return ESP_OK;
+}
+
+// ==================== 电源监控接口实现 ====================
+
+esp_err_t power_monitor_init(void)
+{
+    if (s_power_monitor_initialized) {
+        ESP_LOGW(TAG, "Power monitor already initialized");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Initializing power monitor");
+
+    // 初始化ADC
+    esp_err_t ret = init_power_monitor_adc();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize power monitor ADC: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // 初始化UART
+    ret = init_power_chip_uart();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize power chip UART: %s", esp_err_to_name(ret));
+        deinit_power_monitor_adc();
+        return ret;
+    }
+
+    // 初始化电源数据结构
+    memset(&s_hardware_status.power_chip_data, 0, sizeof(power_chip_data_t));
+    memset(&s_hardware_status.voltage_data, 0, sizeof(voltage_monitor_data_t));
+
+    s_power_monitor_initialized = true;
+    ESP_LOGI(TAG, "Power monitor initialized successfully");
+
+    // 启动监控任务
+    power_monitor_start_task();
+
+    return ESP_OK;
+}
+
+esp_err_t power_monitor_deinit(void)
+{
+    if (!s_power_monitor_initialized) {
+        ESP_LOGW(TAG, "Power monitor not initialized");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Deinitializing power monitor");
+
+    // 停止监控任务
+    power_monitor_stop_task();
+
+    // 反初始化UART
+    deinit_power_chip_uart();
+
+    // 反初始化ADC
+    deinit_power_monitor_adc();
+
+    s_power_monitor_initialized = false;
+    ESP_LOGI(TAG, "Power monitor deinitialized");
+
+    return ESP_OK;
+}
+
+float power_get_supply_voltage(void)
+{
+    if (!s_power_monitor_initialized || s_adc2_handle == NULL) {
+        ESP_LOGW(TAG, "Power monitor not initialized");
+        return 0.0;
+    }
+
+    int raw_adc;
+    int voltage_mv;
+
+    // 读取ADC原始值 (GPIO18 -> ADC2_CHANNEL_7)
+    esp_err_t ret = adc_oneshot_read(s_adc2_handle, ADC_CHANNEL_7, &raw_adc);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read supply voltage ADC: %s", esp_err_to_name(ret));
+        return 0.0;
+    }
+
+    // 校准到电压值
+    if (s_adc2_cali_handle != NULL) {
+        ret = adc_cali_raw_to_voltage(s_adc2_cali_handle, raw_adc, &voltage_mv);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to calibrate supply voltage: %s", esp_err_to_name(ret));
+            return 0.0;
+        }
+    } else {
+        // 如果没有校准，使用默认的线性转换
+        voltage_mv = (raw_adc * 3300) / 4095;
+    }
+
+    // 根据分压电路计算实际电压
+    // 实际测试：ADC测量2.43V对应实际27.8V，分压比约为11.4
+    // 调整分压比从4.0到11.4
+    float actual_voltage = (voltage_mv / 1000.0) * 11.4;
+
+    ESP_LOGD(TAG, "Supply voltage: raw=%d, mv=%d, actual=%.2fV", raw_adc, voltage_mv, actual_voltage);
+    return actual_voltage;
+}
+
+esp_err_t power_chip_read_data(uint32_t timeout_ms)
+{
+    if (!s_power_uart_initialized) {
+        ESP_LOGE(TAG, "Power chip UART not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Starting power chip data read with %lu ms timeout", timeout_ms);
+
+    uint8_t data[256];
+    size_t length = 0;
+
+    // 清空接收缓冲区
+    uart_flush_input(POWER_CHIP_UART_NUM);
+    ESP_LOGI(TAG, "UART input buffer flushed");
+
+    // 等待一小段时间让数据到达
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 检查是否有数据可读
+    size_t buffered_size;
+    uart_get_buffered_data_len(POWER_CHIP_UART_NUM, &buffered_size);
+    ESP_LOGI(TAG, "Buffered data size before read: %d bytes", buffered_size);
+
+    // 读取数据
+    int len = uart_read_bytes(POWER_CHIP_UART_NUM, data, sizeof(data) - 1, pdMS_TO_TICKS(timeout_ms));
+    ESP_LOGI(TAG, "UART read returned: %d", len);
+    
+    if (len > 0) {
+        length = len;
+        data[length] = '\0'; // 确保字符串结束
+
+        ESP_LOGI(TAG, "Power chip UART received %d bytes", length);
+        ESP_LOG_BUFFER_HEX(TAG, data, length);
+        
+        // 也以ASCII形式显示，以防是文本数据
+        ESP_LOGI(TAG, "Data as ASCII: %.*s", length, data);
+
+        // 解析数据
+        power_chip_data_t parsed_data;
+        esp_err_t ret = parse_power_chip_data(data, length, &parsed_data);
+        if (ret == ESP_OK) {
+            // 更新全局数据
+            s_hardware_status.power_chip_data = parsed_data;
+            ESP_LOGI(TAG, "Power chip data: %.2fV, %.3fA, %.2fW", 
+                     parsed_data.voltage, parsed_data.current, parsed_data.power);
+        } else {
+            ESP_LOGW(TAG, "Failed to parse power chip data: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    } else if (len == 0) {
+        ESP_LOGW(TAG, "Power chip UART read timeout - no data received");
+        return ESP_ERR_TIMEOUT;
+    } else {
+        ESP_LOGE(TAG, "Power chip UART read error: %d", len);
+        return ESP_FAIL;
+    }
+}
+
+esp_err_t power_get_chip_data(power_chip_data_t *data)
+{
+    if (data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_hardware_status.power_chip_data.valid) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    *data = s_hardware_status.power_chip_data;
+    return ESP_OK;
+}
+
+esp_err_t power_get_voltage_data(voltage_monitor_data_t *data)
+{
+    if (data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 实时读取电压值
+    data->supply_voltage = power_get_supply_voltage();
+    data->timestamp = esp_log_timestamp();
+
+    // 更新全局状态
+    s_hardware_status.voltage_data = *data;
+
+    return ESP_OK;
+}
+
+esp_err_t power_monitor_start_task(void)
+{
+    if (s_power_monitor_task_handle != NULL) {
+        ESP_LOGW(TAG, "Power monitor task already running");
+        return ESP_OK;
+    }
+
+    BaseType_t ret = xTaskCreate(power_monitor_task,
+                                "power_monitor",
+                                4096,
+                                NULL,
+                                5,
+                                &s_power_monitor_task_handle);
+
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create power monitor task");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Power monitor task started");
+    return ESP_OK;
+}
+
+esp_err_t power_monitor_stop_task(void)
+{
+    if (s_power_monitor_task_handle != NULL) {
+        vTaskDelete(s_power_monitor_task_handle);
+        s_power_monitor_task_handle = NULL;
+        ESP_LOGI(TAG, "Power monitor task stopped");
+    }
+    return ESP_OK;
+}
+
+bool power_check_voltage_change(void)
+{
+    float current_supply_voltage = power_get_supply_voltage();
+
+    bool voltage_changed = false;
+
+    // 检查供电电压变化
+    if (s_last_supply_voltage > 0 && 
+        fabsf(current_supply_voltage - s_last_supply_voltage) > s_voltage_threshold) {
+        ESP_LOGW(TAG, "🔋 电压变化触发! %.2fV -> %.2fV (阈值: %.2fV, 变化: %.2fV)",
+                 s_last_supply_voltage, current_supply_voltage, s_voltage_threshold,
+                 fabsf(current_supply_voltage - s_last_supply_voltage));
+        printf("⚠️  电压变化检测: %.2fV -> %.2fV (超过阈值%.2fV)\n", 
+               s_last_supply_voltage, current_supply_voltage, s_voltage_threshold);
+        voltage_changed = true;
+    }
+
+    // 更新记录的电压值
+    s_last_supply_voltage = current_supply_voltage;
+
+    return voltage_changed;
+}
+
+esp_err_t power_set_voltage_threshold(float threshold)
+{
+    if (threshold <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_voltage_threshold = threshold;
+    ESP_LOGI(TAG, "Voltage change threshold set to %.2fV", threshold);
+    return ESP_OK;
+}
+
+esp_err_t power_print_status(void)
+{
+    printf("==================== 电源监控状态 ====================\n");
+    printf("初始化状态: %s\n", s_power_monitor_initialized ? "已初始化" : "未初始化");
+    printf("UART状态: %s\n", s_power_uart_initialized ? "已初始化" : "未初始化");
+    printf("监控任务: %s\n", s_power_monitor_task_handle ? "运行中" : "已停止");
+    printf("电压阈值: %.2fV\n", s_voltage_threshold);
+
+    // 电压数据
+    voltage_monitor_data_t voltage_data;
+    esp_err_t ret = power_get_voltage_data(&voltage_data);
+    if (ret == ESP_OK) {
+        printf("供电电压 (GPIO18): %.2fV\n", voltage_data.supply_voltage);
+    } else {
+        printf("供电电压: 读取失败\n");
+    }
+
+    // 电源芯片数据
+    if (s_hardware_status.power_chip_data.valid) {
+        uint32_t data_age_ms = esp_log_timestamp() - s_hardware_status.power_chip_data.timestamp;
+        printf("电源芯片数据 (数据年龄: %lu 毫秒):\n", data_age_ms);
+        printf("  电压: %.2fV\n", s_hardware_status.power_chip_data.voltage);
+        printf("  电流: %.3fA\n", s_hardware_status.power_chip_data.current);
+        printf("  功率: %.2fW\n", s_hardware_status.power_chip_data.power);
+    } else {
+        printf("电源芯片数据: 正在读取...\n");
+        // 自动尝试读取电源芯片数据
+        esp_err_t ret = power_chip_read_data(2000); // 2秒超时
+        if (ret == ESP_OK && s_hardware_status.power_chip_data.valid) {
+            printf("电源芯片数据 (刚刚读取):\n");
+            printf("  电压: %.2fV\n", s_hardware_status.power_chip_data.voltage);
+            printf("  电流: %.3fA\n", s_hardware_status.power_chip_data.current);
+            printf("  功率: %.2fW\n", s_hardware_status.power_chip_data.power);
+        } else {
+            printf("电源芯片数据: 读取失败 (%s)\n", esp_err_to_name(ret));
+        }
+    }
+
+    printf("================================================\n");
+    return ESP_OK;
+}
+
+bool power_get_uart_status(void)
+{
+    return s_power_uart_initialized;
+}
+
+// ==================== 电源监控静态函数实现 ====================
+
+static esp_err_t init_power_monitor_adc(void)
+{
+    esp_err_t ret;
+
+    // 初始化ADC2 (用于GPIO18 - 供电电压监测)
+    adc_oneshot_unit_init_cfg_t init_config2 = {
+        .unit_id = ADC_UNIT_2,
+    };
+    ret = adc_oneshot_new_unit(&init_config2, &s_adc2_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC2 initialization failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // 配置ADC2通道 (GPIO18 -> ADC2_CHANNEL_7) 
+    adc_oneshot_chan_cfg_t chan_config2 = {
+        .atten = ADC_ATTEN_DB_12,  // 0~3.3V
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ret = adc_oneshot_config_channel(s_adc2_handle, ADC_CHANNEL_7, &chan_config2);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC2 channel config failed: %s", esp_err_to_name(ret));
+        adc_oneshot_del_unit(s_adc2_handle);
+        s_adc2_handle = NULL;
+        return ret;
+    }
+
+    // ADC2校准
+    adc_cali_curve_fitting_config_t cali_config2 = {
+        .unit_id = ADC_UNIT_2,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ret = adc_cali_create_scheme_curve_fitting(&cali_config2, &s_adc2_cali_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "ADC2 calibration failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "ADC2 calibration successful");
+    }
+
+    ESP_LOGI(TAG, "Power monitor ADC initialized successfully");
+    return ESP_OK;
+}
+
+static esp_err_t init_power_chip_uart(void)
+{
+    if (s_power_uart_initialized) {
+        ESP_LOGW(TAG, "Power chip UART already initialized");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Initializing power chip UART - RX Pin: GPIO%d", POWER_CHIP_UART_RX_PIN);
+
+    uart_config_t uart_config = {
+        .baud_rate = POWER_CHIP_UART_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    // 配置UART参数
+    esp_err_t ret = uart_param_config(POWER_CHIP_UART_NUM, &uart_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UART param config failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // 设置UART引脚 (只需要RX引脚，TX设置为UART_PIN_NO_CHANGE)
+    ret = uart_set_pin(POWER_CHIP_UART_NUM, UART_PIN_NO_CHANGE, POWER_CHIP_UART_RX_PIN, 
+                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UART set pin failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // 安装UART驱动
+    ret = uart_driver_install(POWER_CHIP_UART_NUM, POWER_CHIP_UART_BUF_SIZE, 
+                             POWER_CHIP_UART_BUF_SIZE, 0, NULL, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UART driver install failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    s_power_uart_initialized = true;
+    ESP_LOGI(TAG, "Power chip UART initialized successfully");
+
+    return ESP_OK;
+}
+
+static esp_err_t deinit_power_monitor_adc(void)
+{
+    if (s_adc2_cali_handle) {
+        adc_cali_delete_scheme_curve_fitting(s_adc2_cali_handle);
+        s_adc2_cali_handle = NULL;
+    }
+
+    if (s_adc2_handle) {
+        adc_oneshot_del_unit(s_adc2_handle);
+        s_adc2_handle = NULL;
+    }
+
+    ESP_LOGI(TAG, "Power monitor ADC deinitialized");
+    return ESP_OK;
+}
+
+static esp_err_t deinit_power_chip_uart(void)
+{
+    if (s_power_uart_initialized) {
+        uart_driver_delete(POWER_CHIP_UART_NUM);
+        s_power_uart_initialized = false;
+        ESP_LOGI(TAG, "Power chip UART deinitialized");
+    }
+    return ESP_OK;
+}
+
+static void power_monitor_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "Power monitor task started");
+
+    // 延迟启动，等待系统稳定
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    while (1) {
+        // 检查电压变化
+        if (power_check_voltage_change()) {
+            ESP_LOGI(TAG, "🔋 电压变化触发电源芯片数据读取");
+            printf("📊 后台监控: 检测到电压变化，正在读取电源芯片数据...\n");
+            
+            // 尝试读取电源芯片数据
+            esp_err_t ret = power_chip_read_data(1000); // 1秒超时
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "✅ 电源芯片数据更新成功");
+                printf("✅ 电源数据已更新: %.2fV, %.3fA, %.2fW\n", 
+                       s_hardware_status.power_chip_data.voltage,
+                       s_hardware_status.power_chip_data.current,
+                       s_hardware_status.power_chip_data.power);
+            } else if (ret == ESP_ERR_TIMEOUT) {
+                ESP_LOGW(TAG, "⏱️  电源芯片数据读取超时");
+                printf("⏱️  电源芯片数据读取超时\n");
+            } else {
+                ESP_LOGE(TAG, "❌ 电源芯片数据读取失败: %s", esp_err_to_name(ret));
+                printf("❌ 电源芯片数据读取失败: %s\n", esp_err_to_name(ret));
+            }
+        }
+
+        // 更新电压监控数据
+        voltage_monitor_data_t voltage_data;
+        power_get_voltage_data(&voltage_data);
+
+        // 等待下一次检查
+        vTaskDelay(pdMS_TO_TICKS(VOLTAGE_MONITOR_INTERVAL_MS));
+    }
+}
+
+static esp_err_t parse_power_chip_data(const uint8_t *raw_data, size_t data_len, power_chip_data_t *data)
+{
+    if (raw_data == NULL || data == NULL || data_len < 4) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 诊断：检查接收到的数据类型
+    bool all_zero = true;
+    bool all_same = true;
+    uint8_t first_byte = raw_data[0];
+    
+    for (size_t i = 0; i < data_len; i++) {
+        if (raw_data[i] != 0x00) {
+            all_zero = false;
+        }
+        if (raw_data[i] != first_byte) {
+            all_same = false;
+        }
+    }
+    
+    if (all_zero) {
+        ESP_LOGW(TAG, "接收到全零数据(%zu bytes) - 可能硬件未连接或芯片未工作", data_len);
+        return ESP_ERR_INVALID_RESPONSE;
+    } else if (all_same) {
+        ESP_LOGW(TAG, "接收到重复数据: 0x%02X (%zu bytes) - 可能硬件故障", first_byte, data_len);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    // 实际数据格式: [0xFF帧头][电压][电流][CRC]
+    // 例如: 0xFF 0x1C 0x32 0x??
+    
+    // 查找帧头0xFF
+    int packet_start = -1;
+    for (int i = 0; i <= (int)data_len - 4; i++) {
+        if (raw_data[i] == 0xFF && i + 3 < (int)data_len) {
+            packet_start = i;
+            break;
+        }
+    }
+
+    if (packet_start == -1 || (packet_start + 4) > (int)data_len) {
+        ESP_LOGW(TAG, "未找到有效数据包(0xFF帧头)");
+        ESP_LOGW(TAG, "数据样本: 0x%02X 0x%02X 0x%02X 0x%02X...", 
+                 data_len > 0 ? raw_data[0] : 0,
+                 data_len > 1 ? raw_data[1] : 0,
+                 data_len > 2 ? raw_data[2] : 0,
+                 data_len > 3 ? raw_data[3] : 0);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    // 提取数据包 [0xFF][电压][电流][CRC]
+    // 例如: 0xFF 0x1C 0x32 0x??
+    uint8_t frame_header = raw_data[packet_start];      // 0xFF (帧头)
+    uint8_t voltage_raw = raw_data[packet_start + 1];   // 0x1C (电压数据)
+    uint8_t current_raw = raw_data[packet_start + 2];   // 0x32 (电流数据)
+    uint8_t crc_received = raw_data[packet_start + 3];  // CRC校验
+
+    ESP_LOGI(TAG, "解析数据包: 帧头=0x%02X, 电压=0x%02X, 电流=0x%02X, CRC=0x%02X", 
+             frame_header, voltage_raw, current_raw, crc_received);
+
+    // 验证CRC (可选，如果需要严格校验)
+    uint8_t crc_calculated = calculate_crc8(&raw_data[packet_start], 3);
+    if (crc_calculated != crc_received) {
+        ESP_LOGD(TAG, "CRC不匹配: 计算=0x%02X, 接收=0x%02X (忽略，继续解析)", crc_calculated, crc_received);
+        // 注意：CRC不匹配但数据可能仍然有效，继续解析
+    }
+
+    // 转换数据 (根据技术文档调整)
+    // 0x1C(28) → 28V, 0x32(50) → 5A
+    // 电压: 直接转换 (1:1)
+    // 电流: 除以10
+    float voltage = (float)voltage_raw;           // 直接使用原始值作为电压
+    float current = (float)current_raw / 10.0;    // 原始值除以10得到电流
+    float power = voltage * current;
+
+    // 填充数据结构
+    data->valid = true;
+    data->voltage = voltage;
+    data->current = current; 
+    data->power = power;
+    data->timestamp = esp_log_timestamp();
+
+    ESP_LOGI(TAG, "解析电源数据: %.2fV, %.3fA, %.2fW (原始: 电压=0x%02X, 电流=0x%02X, CRC=0x%02X)",
+             voltage, current, power, voltage_raw, current_raw, crc_received);
+
+    return ESP_OK;
+}
+
+// CRC8校验函数 - 使用Maxim/Dallas算法（多项式0x31）
+static uint8_t calculate_crc8(const uint8_t *data, size_t length)
+{
+    uint8_t crc = 0x00;  // Maxim算法初始值为0x00
+    
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x80) {
+                crc = (crc << 1) ^ 0x31;  // Maxim/Dallas多项式
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    
+    return crc;
+}
+
+// 新增：UART原始数据分析函数
+esp_err_t power_analyze_uart_data(uint32_t timeout_ms)
+{
+    if (!s_power_uart_initialized) {
+        ESP_LOGE(TAG, "UART not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "==================== UART数据分析 ====================");
+    ESP_LOGI(TAG, "监控UART数据%lu毫秒，分析协议类型...", timeout_ms);
+    
+    uint8_t *buffer = malloc(1024);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate buffer");
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t total_bytes = 0;
+    uint32_t start_time = esp_log_timestamp();
+    uint8_t byte_frequency[256] = {0}; // 统计每个字节值的出现频率
+    
+    while ((esp_log_timestamp() - start_time) < timeout_ms) {
+        int length = uart_read_bytes(UART_NUM_1, buffer, 128, pdMS_TO_TICKS(100));
+        if (length > 0) {
+            total_bytes += length;
+            
+            // 统计字节频率
+            for (int i = 0; i < length; i++) {
+                byte_frequency[buffer[i]]++;
+            }
+            
+            // 显示最新数据
+            ESP_LOGI(TAG, "接收 %d bytes:", length);
+            for (int i = 0; i < length && i < 32; i++) {
+                printf("0x%02X ", buffer[i]);
+                if ((i + 1) % 16 == 0) printf("\n");
+            }
+            if (length > 32) printf("... (%d bytes total)\n", length);
+            else printf("\n");
+        }
+    }
+    
+    ESP_LOGI(TAG, "==================== 分析结果 ====================");
+    ESP_LOGI(TAG, "总接收字节数: %zu", total_bytes);
+    
+    if (total_bytes == 0) {
+        ESP_LOGW(TAG, "未接收到任何数据 - 可能硬件未连接");
+        free(buffer);
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    // 分析数据模式
+    int non_zero_bytes = 0;
+    int different_values = 0;
+    
+    for (int i = 0; i < 256; i++) {
+        if (byte_frequency[i] > 0) {
+            if (i != 0) non_zero_bytes += byte_frequency[i];
+            different_values++;
+        }
+    }
+    
+    ESP_LOGI(TAG, "数据多样性: %d种不同字节值", different_values);
+    ESP_LOGI(TAG, "非零字节: %d/%zu (%.1f%%)", non_zero_bytes, total_bytes, 
+             total_bytes > 0 ? (non_zero_bytes * 100.0 / total_bytes) : 0);
+    
+    // 检查常见协议特征
+    if (byte_frequency[0xFF] > 0) {
+        ESP_LOGI(TAG, "发现0xFF包头 %d次 - 可能是XSP16或类似协议", byte_frequency[0xFF]);
+    }
+    if (byte_frequency[0xAA] > 0) {
+        ESP_LOGI(TAG, "发现0xAA %d次 - 可能是其他协议同步字节", byte_frequency[0xAA]);
+    }
+    if (byte_frequency[0x55] > 0) {
+        ESP_LOGI(TAG, "发现0x55 %d次 - 可能是其他协议同步字节", byte_frequency[0x55]);
+    }
+    
+    // 推断协议类型
+    if (different_values == 1 && byte_frequency[0x00] == total_bytes) {
+        ESP_LOGW(TAG, "结论: 全零数据 - 硬件可能未连接或芯片未工作");
+    } else if (different_values < 5) {
+        ESP_LOGW(TAG, "结论: 数据变化很少 - 可能硬件故障或信号问题");
+    } else if (byte_frequency[0xFF] > 0) {
+        ESP_LOGI(TAG, "结论: 可能是XSP16或类似的有包头协议");
+    } else {
+        ESP_LOGI(TAG, "结论: 未知协议格式，需要进一步分析");
+    }
+    
+    ESP_LOGI(TAG, "================================================");
+    
+    free(buffer);
     return ESP_OK;
 }
