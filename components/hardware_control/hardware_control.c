@@ -129,6 +129,17 @@ esp_err_t hardware_control_init(void)
     s_initialized = true;
     s_hardware_status.initialized = true;
     
+    // 在系统启动时自动进行一次LPMU power toggle，实现随系统启动开机
+    // 注意：这必须在设置初始化标志之后执行，因为lpmu_power_toggle()会检查s_initialized状态
+    ESP_LOGI(TAG, "Performing startup LPMU power toggle...");
+    ret = lpmu_power_toggle();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Startup LPMU power toggle failed: %s", esp_err_to_name(ret));
+        // LPMU toggle失败不影响整个系统的初始化，只记录警告
+    } else {
+        ESP_LOGI(TAG, "Startup LPMU power toggle completed successfully");
+    }
+    
     ESP_LOGI(TAG, "Hardware control component initialized successfully");
     return ESP_OK;
 }
